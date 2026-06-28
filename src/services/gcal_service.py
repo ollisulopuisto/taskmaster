@@ -25,12 +25,8 @@ class GCalService:
     def get_todays_events(self, *, today: date | None = None) -> list[dict[str, Any]]:
         """Return non-cancelled events occurring on `today` across all calendars."""
         reference = today or date.today()
-        time_min = datetime(
-            reference.year, reference.month, reference.day, 0, 0, 0, tzinfo=UTC
-        )
-        time_max = datetime(
-            reference.year, reference.month, reference.day, 23, 59, 59, tzinfo=UTC
-        )
+        time_min = datetime(reference.year, reference.month, reference.day, 0, 0, 0, tzinfo=UTC)
+        time_max = datetime(reference.year, reference.month, reference.day, 23, 59, 59, tzinfo=UTC)
 
         events: list[dict[str, Any]] = []
         for cal_id in self._calendar_ids:
