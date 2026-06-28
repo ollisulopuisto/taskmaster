@@ -1,0 +1,43 @@
+[project]
+name = "taskmaster"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { email = "dst@iki.fi" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.138.1",
+    "google-api-python-client>=2.198.0",
+    "instructor>=1.15.4",
+    "litellm>=1.90.0",
+    "pydantic>=2.13.4",
+    "pytest>=9.1.1",
+    "pytest-mock>=3.15.1",
+    "ruff>=0.15.20",
+    "todoist-api-python>=4.0.0",
+    "uvicorn>=0.49.0",
+]
+
+[project.scripts]
+taskmaster = "main:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/main.py", "src/api", "src/services", "src/models"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
