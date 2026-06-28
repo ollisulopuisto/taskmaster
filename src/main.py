@@ -1,8 +1,8 @@
 """FastAPI application entrypoint."""
 
-from fastapi import FastAPI
+from api.router import create_app
 
-app = FastAPI(title="TaskMaster Triage Helper")
+app = create_app()
 
 
 @app.get("/health")

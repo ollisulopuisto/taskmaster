@@ -19,6 +19,10 @@ class TodoistService:
     def __init__(self, token: str) -> None:
         self._api = TodoistAPI(token)
 
+    def complete_task(self, task_id: str) -> None:
+        """Mark a Todoist task as completed."""
+        self._api.complete_task(task_id)
+
     def get_todays_tasks(self, *, today: date | None = None) -> list[InternalTask]:
         """Return incomplete tasks due today or overdue.
 
