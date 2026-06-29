@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from models.task import TimeBlock
 from services.gcal_service import GCalService
 
@@ -34,8 +36,35 @@ def _all_day_event(*, id: str = "evt-1", summary: str = "Holiday", day: str = "2
 
 
 class TestGCalService:
+    _VALID_TOKEN_JSON = (
+        '{"token": "ya29.fake", "refresh_token": "1//fake", '
+        '"token_uri": "https://oauth2.googleapis.com/token", '
+        '"client_id": "cid", "client_secret": "secret", '
+        '"scopes": ["https://www.googleapis.com/auth/calendar.readonly"], '
+        '"expiry": "2099-01-01T00:00:00Z"}'
+    )
+
     def _service(self, calendar_ids: list[str] | None = None) -> GCalService:
-        return GCalService(calendar_ids=calendar_ids or ["primary"])
+        # Pre-stub a valid token so the constructor's _load_credentials
+        # short-circuits via the cached-token branch and never hits the network.
+        token_path = "/tmp/fake-token.json"
+        with open(token_path, "w") as fh:
+            fh.write(self._VALID_TOKEN_JSON)
+        return GCalService(
+            calendar_ids=calendar_ids or ["primary"],
+            credentials_path="/tmp/fake-credentials.json",
+            token_path=token_path,
+        )
+
+    def _patch_path_exists(self, *, token_exists: bool = False, credentials_exists: bool = False):
+        def fake_exists(path: str) -> bool:
+            if path == "/tmp/fake-token.json":
+                return token_exists
+            if path == "/tmp/fake-credentials.json":
+                return credentials_exists
+            return False
+
+        return patch("os.path.exists", side_effect=fake_exists)
 
     def _fake_service(self) -> MagicMock:
         """Build a mocked google calendar service object."""
@@ -208,3 +237,91 @@ class TestGCalService:
         assert blocks == [
             TimeBlock(start="2026-06-28T08:00:00+00:00", end="2026-06-28T18:00:00+00:00")
         ]
+
+
+class TestGCalAuth:
+    """Verify the OAuth credential-resolution flow without hitting the network."""
+
+    VALID_TOKEN_JSON = (
+        '{"token": "ya29.fake", "refresh_token": "1//fake", '
+        '"token_uri": "https://oauth2.googleapis.com/token", '
+        '"client_id": "cid", "client_secret": "secret", '
+        '"scopes": ["https://www.googleapis.com/auth/calendar.readonly"], '
+        '"expiry": "2099-01-01T00:00:00Z"}'
+    )
+
+    def test_uses_existing_token_when_valid(self, tmp_path) -> None:
+        token_path = tmp_path / "token.json"
+        token_path.write_text(self.VALID_TOKEN_JSON)
+
+        with patch("services.gcal_service.build") as mock_build:
+            GCalService(
+                credentials_path=str(tmp_path / "missing.json"),
+                token_path=str(token_path),
+            )
+
+        mock_build.assert_called_once()
+        # build() must be invoked with resolved credentials
+        call_kwargs = mock_build.call_args.kwargs
+        assert call_kwargs["credentials"] is not None
+        assert call_kwargs["credentials"].valid is True
+
+    def test_missing_token_triggers_consent_flow(self, tmp_path) -> None:
+        credentials_path = tmp_path / "credentials.json"
+        credentials_path.write_text("{}")
+
+        fake_creds = MagicMock()
+        fake_creds.to_json.return_value = "{}"
+
+        with (
+            patch("services.gcal_service.build"),
+            patch("services.gcal_service.InstalledAppFlow") as MockFlow,
+            patch("os.path.exists", side_effect=lambda p: p == str(credentials_path)),
+        ):
+            MockFlow.from_client_secrets_file.return_value.run_local_server.return_value = (
+                fake_creds
+            )
+            GCalService(
+                credentials_path=str(credentials_path),
+                token_path=str(tmp_path / "token.json"),
+            )
+
+        MockFlow.from_client_secrets_file.assert_called_once_with(
+            str(credentials_path),
+            ["https://www.googleapis.com/auth/calendar.readonly"],
+        )
+        MockFlow.from_client_secrets_file.return_value.run_local_server.assert_called_once_with(
+            port=0
+        )
+
+    def test_consent_flow_writes_token_file(self, tmp_path) -> None:
+        credentials_path = tmp_path / "credentials.json"
+        credentials_path.write_text("{}")
+        token_path = tmp_path / "token.json"
+
+        fake_creds = MagicMock()
+        fake_creds.to_json.return_value = self.VALID_TOKEN_JSON
+
+        with (
+            patch("services.gcal_service.build"),
+            patch("services.gcal_service.InstalledAppFlow") as MockFlow,
+            patch("os.path.exists", side_effect=lambda p: p == str(credentials_path)),
+        ):
+            MockFlow.from_client_secrets_file.return_value.run_local_server.return_value = (
+                fake_creds
+            )
+            GCalService(
+                credentials_path=str(credentials_path),
+                token_path=str(token_path),
+            )
+
+        assert token_path.exists()
+        assert token_path.read_text() == self.VALID_TOKEN_JSON
+
+    def test_missing_credentials_file_raises(self, tmp_path) -> None:
+        with patch("services.gcal_service.build"), patch("os.path.exists", return_value=False):
+            with pytest.raises(FileNotFoundError):
+                GCalService(
+                    credentials_path=str(tmp_path / "nope.json"),
+                    token_path=str(tmp_path / "token.json"),
+                )

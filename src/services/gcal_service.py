@@ -3,24 +3,81 @@
 Fetches today's events and computes free-time blocks from one or more
 calendar IDs. All external calls go through `googleapiclient.discovery.build`,
 which is mocked in tests.
+
+Authentication uses the local desktop OAuth flow
+(`google_auth_oauthlib.flow.InstalledAppFlow`) with credentials resolved in
+this order:
+
+1. If `token.json` exists and yields valid credentials, use it as-is.
+2. Otherwise, read the OAuth client secrets file at `credentials_path`
+   (defaults to `credentials.json`) and launch the browser consent flow.
+3. Persist the authorized credentials back to `token.json` for subsequent
+   runs, then build the Calendar API client with those credentials.
 """
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, date, datetime
 from typing import Any
 
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
 from models.task import TimeBlock
+
+SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+_TOKEN_PATH = "token.json"
 
 
 class GCalService:
     """Wraps the Google Calendar API and returns normalized events + free blocks."""
 
-    def __init__(self, calendar_ids: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        calendar_ids: list[str] | None = None,
+        credentials_path: str = "credentials.json",
+        token_path: str = _TOKEN_PATH,
+    ) -> None:
         self._calendar_ids = calendar_ids or ["primary"]
-        self._service = build("calendar", "v3")
+        self._credentials_path = credentials_path
+        self._token_path = token_path
+        self._service = build("calendar", "v3", credentials=self._load_credentials())
+
+    def _load_credentials(self) -> Credentials:
+        """Resolve OAuth credentials from disk or the consent flow."""
+        creds = self._load_existing_token()
+        if creds and creds.valid:
+            return creds
+
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(None)
+            self._save_token(creds)
+            return creds
+
+        return self._run_consent_flow()
+
+    def _load_existing_token(self) -> Credentials | None:
+        if os.path.exists(self._token_path):
+            return Credentials.from_authorized_user_file(self._token_path, SCOPES)
+        return None
+
+    def _run_consent_flow(self) -> Credentials:
+        if not os.path.exists(self._credentials_path):
+            raise FileNotFoundError(
+                f"OAuth client secrets not found at {self._credentials_path!r}. "
+                "Download it from Google Cloud Console and place it alongside "
+                "this file, or set GOOGLE_CREDENTIALS_PATH in .env."
+            )
+        flow = InstalledAppFlow.from_client_secrets_file(self._credentials_path, SCOPES)
+        creds = flow.run_local_server(port=0)
+        self._save_token(creds)
+        return creds
+
+    def _save_token(self, creds: Credentials) -> None:
+        with open(self._token_path, "w") as fh:
+            fh.write(creds.to_json())
 
     def get_todays_events(self, *, today: date | None = None) -> list[dict[str, Any]]:
         """Return non-cancelled events occurring on `today` across all calendars."""
