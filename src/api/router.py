@@ -44,7 +44,7 @@ def _build_dependencies() -> dict[str, Any]:
         ),
         "llm": LLMService(
             model=os.getenv("OLLAMA_MODEL", "llama3"),
-            base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
+            base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:8000/v1"),
         ),
     }
 

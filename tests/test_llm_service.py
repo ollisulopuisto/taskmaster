@@ -15,7 +15,7 @@ def _task(*, id: str = "1", content: str = "Write report", project_id: str = "pr
 
 class TestLLMService:
     def _service(self) -> LLMService:
-        return LLMService(model="llama3", base_url="http://localhost:11434/v1")
+        return LLMService(model="gemma-4-12b-it-Q4_K_M.gguf", base_url="http://localhost:8000/v1")
 
     def _fake_instructor(self) -> MagicMock:
         return MagicMock()
@@ -34,7 +34,6 @@ class TestLLMService:
         )
 
         fake_instructor = self._fake_instructor()
-        # instructor.from_openai(...).chat.completions.create(...) returns the model
         fake_client = MagicMock()
         fake_client.chat.completions.create.return_value = expected
         fake_instructor.from_openai.return_value = fake_client
@@ -56,7 +55,6 @@ class TestLLMService:
         with self._patch_instructor(fake_instructor):
             self._service().plan_triage(tasks=tasks, free_blocks=[])
 
-        # Verify the call included our task content in the messages
         call_kwargs = fake_client.chat.completions.create.call_args.kwargs
         messages = call_kwargs["messages"]
         prompt_text = " ".join(m.get("content", "") for m in messages)
@@ -92,6 +90,7 @@ class TestLLMService:
         call_kwargs = fake_client.chat.completions.create.call_args.kwargs
         # instructor passes the pydantic model as response_model
         assert call_kwargs.get("response_model") is TriagePlan
+        assert call_kwargs.get("max_tokens") == 2048
 
     def test_plan_triage_handles_empty_task_list(self) -> None:
         fake_instructor = self._fake_instructor()

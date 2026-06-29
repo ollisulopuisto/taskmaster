@@ -10,7 +10,7 @@ from __future__ import annotations
 import requests
 import streamlit as st
 
-API_BASE = "http://localhost:8000"
+API_BASE = "http://localhost:8002"
 
 
 def fetch_morning_payload() -> dict | None:

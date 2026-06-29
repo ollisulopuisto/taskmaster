@@ -50,7 +50,7 @@ class TestSubmitEvening:
 
         assert submit_evening(["1", "2"], ["3"]) is True
         mock_post.assert_called_once_with(
-            "http://localhost:8000/api/triage/evening",
+            "http://localhost:8002/api/triage/evening",
             json={"completed_ids": ["1", "2"], "rolled_over_ids": ["3"]},
             timeout=30,
         )
