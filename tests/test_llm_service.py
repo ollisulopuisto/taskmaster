@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import date
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from models.task import Task, TriagePlan
 from services.llm_service import LLMService
 
@@ -105,3 +107,101 @@ class TestLLMService:
         assert result.big == []
         assert result.medium == []
         assert result.small == []
+
+    def test_plan_triage_sends_system_message_for_json_mode(self) -> None:
+        """Verify the system prompt instructs the LLM to return only JSON."""
+        fake_instructor = self._fake_instructor()
+        fake_client = fake_instructor.from_openai.return_value
+        fake_client.chat.completions.create.return_value = TriagePlan()
+
+        with self._patch_instructor(fake_instructor):
+            self._service().plan_triage(tasks=[], free_blocks=[])
+
+        call_kwargs = fake_client.chat.completions.create.call_args.kwargs
+        messages = call_kwargs["messages"]
+        system_msg = next(m for m in messages if m["role"] == "system")
+        assert "JSON" in system_msg["content"]
+
+    def test_plan_triage_propagates_instructor_errors(self) -> None:
+        """If instructor raises, the exception should propagate to the caller."""
+        fake_instructor = self._fake_instructor()
+        fake_client = fake_instructor.from_openai.return_value
+        fake_client.chat.completions.create.side_effect = ValueError("invalid JSON")
+
+        with self._patch_instructor(fake_instructor):
+            with pytest.raises(ValueError, match="invalid JSON"):
+                self._service().plan_triage(tasks=[], free_blocks=[])
+
+    def test_constructor_configures_instructor_json_mode(self) -> None:
+        """LLMService should use instructor.Mode.JSON for llama.cpp compatibility."""
+        with patch("services.llm_service.instructor") as mock_instructor:
+            mock_instructor.from_openai.return_value = MagicMock()
+            mock_instructor.Mode.JSON = "json-mode"
+
+            LLMService(model="test", base_url="http://localhost:8000/v1")
+
+            call_kwargs = mock_instructor.from_openai.call_args
+            assert call_kwargs.kwargs.get("mode") == "json-mode"
+
+    def test_constructor_uses_correct_model_name(self) -> None:
+        """The model name passed to LLMService must reach the inner client."""
+        service = LLMService(model="gemma-4-12b-it-Q4_K_M.gguf", base_url="http://x")
+        assert service._model == "gemma-4-12b-it-Q4_K_M.gguf"
+
+    def test_constructor_passes_base_url_to_openai(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """OpenAI client must be constructed with the provided base_url and api_key."""
+        captured: dict = {}
+        from openai import OpenAI as RealOpenAI
+
+        def spy_init(self: RealOpenAI, **kwargs: object) -> None:
+            captured["init_kwargs"] = kwargs
+            # Skip network calls during __init__
+            self.base_url = kwargs.get("base_url", "")
+            self.api_key = kwargs.get("api_key", "")
+            self.timeout = kwargs.get("timeout", None)
+
+        monkeypatch.setattr(RealOpenAI, "__init__", spy_init)
+        LLMService(
+            model="m",
+            base_url="http://my-ollama:11434/v1",
+            api_key="custom-key",
+            timeout=90.0,
+        )
+
+        assert captured["init_kwargs"]["base_url"] == "http://my-ollama:11434/v1"
+        assert captured["init_kwargs"]["api_key"] == "custom-key"
+        assert captured["init_kwargs"]["timeout"].read == 90.0
+
+
+class TestBuildPrompt:
+    """Direct tests for the `_build_prompt` static helper."""
+
+    def test_format_includes_all_task_fields(self) -> None:
+        tasks = [Task(id="42", content="Ship release", project_id="p1", due_date=date(2026, 6, 30))]
+        prompt = LLMService._build_prompt(tasks=tasks, free_blocks=[])
+        assert "Ship release" in prompt
+        assert "42" in prompt
+        assert "2026-06-30" in prompt
+
+    def test_format_uses_placeholder_when_no_tasks(self) -> None:
+        prompt = LLMService._build_prompt(tasks=[], free_blocks=[])
+        assert "no tasks due today" in prompt
+
+    def test_format_uses_placeholder_when_no_free_blocks(self) -> None:
+        from models.task import TimeBlock
+
+        blocks = [TimeBlock(start="2026-06-28T09:00:00+00:00", end="2026-06-28T10:00:00+00:00")]
+        prompt = LLMService._build_prompt(tasks=[], free_blocks=blocks)
+        assert "09:00" in prompt
+        assert "no tasks due today" in prompt
+
+    def test_format_lists_multiple_free_blocks(self) -> None:
+        from models.task import TimeBlock
+
+        blocks = [
+            TimeBlock(start="2026-06-28T08:00:00+00:00", end="2026-06-28T09:00:00+00:00"),
+            TimeBlock(start="2026-06-28T14:00:00+00:00", end="2026-06-28T15:00:00+00:00"),
+        ]
+        prompt = LLMService._build_prompt(tasks=[], free_blocks=blocks)
+        assert "08:00" in prompt
+        assert "14:00" in prompt
