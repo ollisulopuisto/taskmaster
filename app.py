@@ -13,14 +13,14 @@ import streamlit as st
 API_BASE = "http://localhost:8000"
 
 
-def fetch_morning_plan() -> dict | None:
+def fetch_morning_payload() -> dict | None:
     """Call the FastAPI morning endpoint. Returns None on failure."""
     try:
         response = requests.get(f"{API_BASE}/api/triage/morning", timeout=60)
         response.raise_for_status()
         return response.json()
     except requests.RequestException as exc:
-        st.error(f"Failed to fetch morning plan: {exc}")
+        st.error(f"Failed to fetch morning payload: {exc}")
         return None
 
 
@@ -39,21 +39,33 @@ def submit_evening(completed_ids: list[str], rolled_over_ids: list[str]) -> bool
         return False
 
 
-def render_morning_tab() -> None:
-    st.header("Morning Triage")
-    st.markdown("Today's schedule and your proposed 1-3-5 plan.")
+def render_schedule_column(schedule: dict) -> None:
+    """Render calendar events and free-time blocks in the left column."""
+    st.subheader("Today's Schedule")
 
-    if st.button("Generate plan", type="primary"):
-        with st.spinner("Asking the local LLM for today's plan..."):
-            plan = fetch_morning_plan()
-        if plan is not None:
-            st.session_state["morning_plan"] = plan
+    events = schedule.get("events", [])
+    if events:
+        st.markdown("**Events**")
+        for event in events:
+            summary = event.get("summary", "(no title)")
+            start = event.get("start", {})
+            # Prefer dateTime for timed events; fall back to date for all-day.
+            when = start.get("dateTime") or start.get("date") or "?"
+            st.markdown(f"- **{summary}** — `{when}`")
+    else:
+        st.markdown("_No events today._")
 
-    plan = st.session_state.get("morning_plan")
-    if plan is None:
-        st.info("Click **Generate plan** to start.")
-        return
+    blocks = schedule.get("free_blocks", [])
+    if blocks:
+        st.markdown("**Free blocks**")
+        for block in blocks:
+            st.markdown(f"- `{block.get('start')} → {block.get('end')}")
+    else:
+        st.markdown("_No free blocks identified._")
 
+
+def render_plan_column(plan: dict) -> None:
+    """Render the 1-3-5 plan with checkboxes in the right column."""
     col1, col2, col3 = st.columns(3)
     with col1:
         st.subheader("Big (1)")
@@ -71,15 +83,41 @@ def render_morning_tab() -> None:
     st.caption(f"Quadrant: {plan.get('quadrant')} · Domain: {plan.get('domain')}")
 
 
+def render_morning_tab() -> None:
+    st.header("Morning Triage")
+    st.markdown("Today's schedule and your proposed 1-3-5 plan.")
+
+    if st.button("Generate plan", type="primary"):
+        with st.spinner("Asking the local LLM for today's plan..."):
+            payload = fetch_morning_payload()
+        if payload is not None:
+            st.session_state["morning_payload"] = payload
+
+    payload = st.session_state.get("morning_payload")
+    if payload is None:
+        st.info("Click **Generate plan** to start.")
+        return
+
+    plan = payload.get("plan", {})
+    schedule = payload.get("schedule", {})
+
+    col_schedule, col_plan = st.columns([1, 2])
+    with col_schedule:
+        render_schedule_column(schedule)
+    with col_plan:
+        render_plan_column(plan)
+
+
 def render_evening_tab() -> None:
     st.header("Evening Debrief")
     st.markdown("Check off what you actually completed today.")
 
-    plan = st.session_state.get("morning_plan")
-    if plan is None:
+    payload = st.session_state.get("morning_payload")
+    if payload is None:
         st.warning("Run the Morning Triage first.")
         return
 
+    plan = payload.get("plan", {})
     all_tasks = plan.get("big", []) + plan.get("medium", []) + plan.get("small", [])
     completed: list[str] = []
     st.subheader("Completed")
@@ -97,7 +135,6 @@ def render_evening_tab() -> None:
 def main() -> None:
     st.set_page_config(page_title="TaskMaster", layout="wide")
     st.title("TaskMaster Triage Helper")
-
     morning_tab, evening_tab = st.tabs(["Morning Triage", "Evening Debrief"])
     with morning_tab:
         render_morning_tab()

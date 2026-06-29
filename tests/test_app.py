@@ -6,27 +6,27 @@ from unittest.mock import MagicMock, patch
 
 import requests
 
-from app import fetch_morning_plan, submit_evening
+from app import fetch_morning_payload, submit_evening
 
 
-class TestFetchMorningPlan:
+class TestFetchMorningPayload:
     @patch("app.requests.get")
     def test_returns_json_on_success(self, mock_get: MagicMock) -> None:
         mock_response = MagicMock()
         mock_response.raise_for_status.return_value = None
-        mock_response.json.return_value = {"big": [], "medium": [], "small": []}
+        mock_response.json.return_value = {"plan": {}, "schedule": {}}
         mock_get.return_value = mock_response
 
-        result = fetch_morning_plan()
+        result = fetch_morning_payload()
 
-        assert result == {"big": [], "medium": [], "small": []}
+        assert result == {"plan": {}, "schedule": {}}
         mock_get.assert_called_once()
 
     @patch("app.requests.get")
     def test_returns_none_on_network_error(self, mock_get: MagicMock) -> None:
         mock_get.side_effect = requests.ConnectionError("down")
 
-        result = fetch_morning_plan()
+        result = fetch_morning_payload()
 
         assert result is None
 
@@ -36,7 +36,7 @@ class TestFetchMorningPlan:
         mock_response.raise_for_status.side_effect = requests.HTTPError("500")
         mock_get.return_value = mock_response
 
-        result = fetch_morning_plan()
+        result = fetch_morning_payload()
 
         assert result is None
 
