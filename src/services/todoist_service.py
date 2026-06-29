@@ -23,6 +23,10 @@ class TodoistService:
         """Mark a Todoist task as completed."""
         self._api.complete_task(task_id)
 
+    def postpone_task(self, task_id: str, new_date: date) -> None:
+        """Push a task's due date to `new_date` (e.g. tomorrow for roll-overs)."""
+        self._api.update_task(task_id=task_id, due_date=new_date.isoformat())
+
     def get_todays_tasks(self, *, today: date | None = None) -> list[InternalTask]:
         """Return incomplete tasks due today or overdue.
 

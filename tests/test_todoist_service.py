@@ -128,3 +128,23 @@ class TestTodoistService:
             result = self._service().get_todays_tasks()
 
         assert [t.id for t in result] == ["1", "2"]
+
+    def test_postpone_task_updates_due_date(self) -> None:
+        from datetime import date
+
+        with patch("services.todoist_service.TodoistAPI") as MockAPI:
+            svc = self._service()
+            svc.postpone_task("1", date(2026, 6, 29))
+
+        MockAPI.return_value.update_task.assert_called_once_with(task_id="1", due_date="2026-06-29")
+
+    def test_postpone_task_accepts_string_id(self) -> None:
+        from datetime import date
+
+        with patch("services.todoist_service.TodoistAPI") as MockAPI:
+            svc = self._service()
+            svc.postpone_task("abc-123", date(2026, 7, 1))
+
+        MockAPI.return_value.update_task.assert_called_once_with(
+            task_id="abc-123", due_date="2026-07-01"
+        )
