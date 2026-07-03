@@ -1,6 +1,6 @@
 [project]
 name = "taskmaster"
-version = "0.1.0"
+version = "26.06.29.4"
 description = "Add your description here"
 readme = "README.md"
 authors = [
@@ -45,3 +45,7 @@ ignore = []
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+addopts = "-m \"not slow\""
+markers = [
+    "slow: tests that hit real llama-server (may take 60s+)",
+]

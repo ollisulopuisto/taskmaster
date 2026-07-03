@@ -34,7 +34,6 @@ uv sync
 cp .env.example .env
 # fill in TODOIST_API_TOKEN and Google OAuth credentials
 # set OLLAMA_BASE_URL + OLLAMA_MODEL to match your local LLM server
-```LM server
 ```
 
 ## Run

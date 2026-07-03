@@ -1986,7 +1986,7 @@ wheels = [
 
 [[package]]
 name = "taskmaster"
-version = "0.1.0"
+version = "26.6.29.4"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },

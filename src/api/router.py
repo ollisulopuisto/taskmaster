@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import os
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, FastAPI
@@ -55,9 +56,10 @@ def morning_triage() -> dict[str, Any]:
     deps = _build_dependencies()
     tasks = deps["todoist"].get_todays_tasks()
     events = deps["gcal"].get_todays_events()
+    tz = ZoneInfo(os.getenv("TIMEZONE", "Europe/Helsinki"))
     free_blocks = deps["gcal"].get_free_time_blocks(
-        day_start=datetime.now(tz=UTC).replace(hour=8, minute=0, second=0),
-        day_end=datetime.now(tz=UTC).replace(hour=18, minute=0, second=0),
+        day_start=datetime.now(tz=tz).replace(hour=8, minute=0, second=0),
+        day_end=datetime.now(tz=tz).replace(hour=18, minute=0, second=0),
     )
     plan: Any = deps["llm"].plan_triage(tasks=tasks, free_blocks=free_blocks)
     return {
@@ -78,7 +80,8 @@ def evening_debrief(payload: EveningRequest) -> EveningResponse:
     for task_id in payload.completed_ids:
         todoist.complete_task(task_id)
 
-    tomorrow = (datetime.now(tz=UTC) + timedelta(days=1)).date()
+    tz = ZoneInfo(os.getenv("TIMEZONE", "Europe/Helsinki"))
+    tomorrow = (datetime.now(tz=tz) + timedelta(days=1)).date()
     for task_id in payload.rolled_over_ids:
         todoist.postpone_task(task_id, tomorrow)
 
