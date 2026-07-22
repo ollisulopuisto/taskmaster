@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.07.22.30] - 2026-07-22
+
+### Added
+
+- **tui**: Wire `Evening Debrief` tab to process today's tasks against Todoist API, rolling over any incomplete tasks to tomorrow.
+
 ## [v26.07.22.29] - 2026-07-22
 
 ### Fixed

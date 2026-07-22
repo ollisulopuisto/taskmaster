@@ -325,8 +325,15 @@ class TaskMasterApp(App):
             evening_text.update("[yellow]Run Morning Triage first to populate tasks.[/yellow]")
             return
 
+        todoist, _, _ = get_services()
+        from datetime import timedelta
+
+        tomorrow = datetime.now().date() + timedelta(days=1)
+        for task in self.all_tasks:
+            todoist.postpone_task(task.id, tomorrow)
+
         evening_text.update(
-            "[bold green]✔ Debrief logged. Incomplete tasks rolled over to tomorrow.[/bold green]"
+            f"[bold green]✔ Debrief logged. {len(self.all_tasks)} tasks rolled over.[/bold green]"
         )
 
     async def action_fetch_debug(self) -> None:

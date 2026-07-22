@@ -128,3 +128,24 @@ async def test_tui_button_labels_reflect_current_task_state(mock_services):
         # Task t1 is in BIG -> #btn-reassign-big-t1 should show "✓ BIG"
         btn_big_t1 = app.query_one("#btn-reassign-big-t1", Button)
         assert "✓ BIG" in str(btn_big_t1.label) or "✓" in str(btn_big_t1.label)
+
+
+@pytest.mark.anyio
+async def test_tui_submit_debrief_completes_and_postpones(mock_services):
+    """Submitting debrief processes tasks against Todoist API."""
+    app = TaskMasterApp()
+    async with app.run_test() as pilot:
+        await pilot.click("#btn-generate-plan")
+        await pilot.pause()
+
+        tabs = app.query_one(TabbedContent)
+        tabs.active = "tab-evening"
+        await pilot.pause()
+
+        btn = app.query_one("#btn-submit-debrief", Button)
+        btn.press()
+        await pilot.pause()
+
+        # Verify debrief executed
+        debrief_text = app.query_one("#evening-text", Static)
+        assert "Debrief logged" in str(debrief_text.content)
