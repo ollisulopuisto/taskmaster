@@ -125,9 +125,18 @@ def main() -> None:
         "--auto", action="store_true", help="Run autonomously without user input (for cron/launchd)"
     )
     parser.add_argument("--json", action="store_true", help="Output raw JSON plan")
+    parser.add_argument(
+        "--cli", action="store_true", help="Run quick non-interactive Rich panel render"
+    )
     args = parser.parse_args()
 
-    run_cli(auto=args.auto, json_output=args.json)
+    if args.auto or args.json or args.cli:
+        run_cli(auto=args.auto, json_output=args.json)
+    else:
+        from src.tui import TaskMasterApp
+
+        app = TaskMasterApp()
+        app.run()
 
 
 if __name__ == "__main__":

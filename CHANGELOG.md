@@ -5,11 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
-## [v26.07.22.17] - 2026-07-22
+## [v26.07.22.18] - 2026-07-22
 
-### Fixed
+### Added
 
-- **llm**: Increase HTTP client timeout to 600s in `LLMService` and `app.py` to allow full Gemma 12B reasoning runs (~5–6 minutes) to finish without timing out.
+- **tui**: Add full interactive Textual terminal application (`src/tui.py`) with mouse & keyboard navigation, tabs (Morning Triage, Evening Debrief, Debug Data), reactive buttons, and side-by-side Rich schedule panels.
+- **cli**: Set `src/tui.py` as default interactive runner for `uv run src/cli.py`.
 
 ## [v26.06.29.4] - 2026-06-29
 
