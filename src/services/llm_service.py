@@ -12,7 +12,11 @@ switch to `Mode.TOOLS` if your server supports function calling natively.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
+from datetime import date
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -26,7 +30,12 @@ class LLMService:
     """Talks to any OpenAI-compatible LLM and returns a structured triage plan."""
 
     def __init__(
-        self, model: str, base_url: str, api_key: str = "ollama", timeout: float = 600.0
+        self,
+        model: str,
+        base_url: str,
+        api_key: str = "ollama",
+        timeout: float = 600.0,
+        cache_dir: str = "",
     ) -> None:
         raw_client = OpenAI(
             base_url=base_url,
@@ -35,6 +44,9 @@ class LLMService:
         )
         self._client = instructor.from_openai(raw_client, mode=instructor.Mode.MD_JSON)
         self._model = model
+        self._cache_dir = Path(cache_dir) if cache_dir else None
+        if self._cache_dir:
+            self._cache_dir.mkdir(parents=True, exist_ok=True)
 
     @classmethod
     def from_env(cls) -> LLMService:
@@ -49,10 +61,45 @@ class LLMService:
         )
         api_key = os.getenv("LLM_API_KEY") or os.getenv("OLLAMA_API_KEY", "ollama")
         timeout = float(os.getenv("LLM_TIMEOUT", "600.0"))
-        return cls(model=model, base_url=base_url, api_key=api_key, timeout=timeout)
+        cache_dir = os.getenv("LLM_CACHE_DIR", ".cache")
+        return cls(
+            model=model,
+            base_url=base_url,
+            api_key=api_key,
+            timeout=timeout,
+            cache_dir=cache_dir,
+        )
 
-    def plan_triage(self, tasks: list[Task], free_blocks: list[Any]) -> TriagePlan:
-        """Ask the LLM to propose a 1-3-5 plan for today."""
+    @classmethod
+    def _compute_input_hash(
+        cls, tasks: list[Task], free_blocks: list[Any], reference_date: date | None = None
+    ) -> str:
+        """Compute a deterministic SHA-256 hash of the input payload."""
+        ref = (reference_date or date.today()).isoformat()
+        task_data = sorted([f"{t.id}:{t.content}:{t.due_date}" for t in tasks])
+        block_data = sorted([f"{b.start}:{b.end}" for b in free_blocks])
+        payload = json.dumps({"ref": ref, "tasks": task_data, "blocks": block_data}, sort_keys=True)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def plan_triage(
+        self,
+        tasks: list[Task],
+        free_blocks: list[Any],
+        *,
+        force_refresh: bool = False,
+        reference_date: date | None = None,
+    ) -> TriagePlan:
+        """Ask the LLM to propose a 1-3-5 plan for today (uses disk cache if payload matches)."""
+        payload_hash = self._compute_input_hash(tasks, free_blocks, reference_date)
+        cache_file = self._cache_dir / f"triage_{payload_hash}.json" if self._cache_dir else None
+
+        if not force_refresh and cache_file and cache_file.exists():
+            try:
+                cached_data = cache_file.read_text(encoding="utf-8")
+                return TriagePlan.model_validate_json(cached_data)
+            except Exception:
+                pass  # Fallback to fresh LLM call if cache reading fails
+
         prompt = self._build_prompt(tasks, free_blocks)
         response = self._client.chat.completions.create(
             model=self._model,
@@ -73,6 +120,13 @@ class LLMService:
             response_model=TriagePlan,
             max_tokens=4096,
         )
+
+        if cache_file:
+            try:
+                cache_file.write_text(response.model_dump_json(), encoding="utf-8")
+            except Exception:
+                pass
+
         return response
 
     @staticmethod

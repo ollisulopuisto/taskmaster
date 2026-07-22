@@ -17,7 +17,11 @@ def _task(*, id: str = "1", content: str = "Write report", project_id: str = "pr
 
 class TestLLMService:
     def _service(self) -> LLMService:
-        return LLMService(model="gemma-4-12b-it-Q4_K_M.gguf", base_url="http://localhost:8000/v1")
+        return LLMService(
+            model="gemma-4-12b-it-Q4_K_M.gguf",
+            base_url="http://localhost:8000/v1",
+            cache_dir="",
+        )
 
     def _fake_instructor(self) -> MagicMock:
         return MagicMock()

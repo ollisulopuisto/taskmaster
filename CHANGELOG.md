@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.07.22.24] - 2026-07-22
+
+### Added
+
+- **llm**: Add SHA-256 payload disk caching to `LLMService` to eliminate redundant API calls for identical daily task/event inputs (0s latency, $0 cost on cache hits). Add `force_refresh` parameter to bypass cache when needed.
+
 ## [v26.07.22.23] - 2026-07-22
 
 ### Added
