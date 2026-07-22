@@ -60,11 +60,12 @@ class LLMService:
                 {
                     "role": "system",
                     "content": (
-                        "Olet päivän triage-assistentti. Käyttäjä antaa tehtäviä "
-                        "(P1-P4 prioriteetilla, kestolla ja myöhästymistiedolla) ja vapaa-aikoja. "
-                        "Valitse 1-3-5 -suunnitelma: 1 Big, 3 Medium ja 5 Small -tehtävää. "
-                        "Laita loput tehtävät 'postponed'-listalle. "
-                        "Palauta validi JSON: 'big', 'medium', 'small' ja 'postponed'."
+                        "Olet päivän triage-assistentti. Säännöt:\n"
+                        "1. P1/P2 ja 1-3pv myöhästyneet tehtävät ovat 'big' ja 'medium'.\n"
+                        "2. Yli 7pv myöhästyneet 'STALE'-tehtävät menevät 'postponed'-listalle.\n"
+                        "3. Kesto <= 15m tehtävät ovat 'small'.\n"
+                        "Valitse 1 Big, 3 Medium, 5 Small -tehtävää.\n"
+                        "Palauta JSON ('big', 'medium', 'small', 'postponed')."
                     ),
                 },
                 {"role": "user", "content": prompt},
@@ -77,7 +78,12 @@ class LLMService:
     @staticmethod
     def _format_task(t: Task) -> str:
         prio_str = f"P{5 - t.priority}" if 1 <= t.priority <= 4 else f"P{t.priority}"
-        overdue_str = f" [OVERDUE by {t.days_overdue}d]" if t.is_overdue else ""
+        if t.is_stale:
+            overdue_str = f" [STALE: {t.days_overdue}d overdue]"
+        elif t.is_overdue:
+            overdue_str = f" [RECENTLY OVERDUE: {t.days_overdue}d]"
+        else:
+            overdue_str = ""
         dur_str = f", dur: {t.duration_minutes}m" if t.duration_minutes else ""
         info = f"(due: {t.due_date}{overdue_str}, priority: {prio_str}{dur_str})"
         return f"- [{t.id}] {t.content} {info}"

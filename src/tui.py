@@ -168,7 +168,12 @@ class TaskMasterApp(App):
         for t in plan.small:
             plan_table.add_row("[green]SMALL (5)[/green]", t.content)
         for t in plan.postponed:
-            plan_table.add_row("[dim magenta]POSTPONED[/dim magenta]", f"[dim]{t.content}[/dim]")
+            stale_badge = (
+                f" [bold yellow][STALE {t.days_overdue}d][/bold yellow]" if t.is_stale else ""
+            )
+            plan_table.add_row(
+                "[dim magenta]POSTPONED[/dim magenta]", f"[dim]{t.content}[/dim]{stale_badge}"
+            )
 
         plan_text.update(plan_table)
 

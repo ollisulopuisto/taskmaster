@@ -18,6 +18,16 @@ def test_task_duration_and_overdue_fields():
     assert t.duration_minutes == 45
     assert t.is_overdue is True
     assert t.days_overdue == 2
+    assert t.is_stale is False
+
+    t_stale = Task(
+        id="t2",
+        content="Old task",
+        project_id="p1",
+        is_overdue=True,
+        days_overdue=10,
+    )
+    assert t_stale.is_stale is True
 
 
 def test_triage_plan_has_postponed_list():

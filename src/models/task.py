@@ -24,6 +24,11 @@ class Task(BaseModel):
     is_overdue: bool = False
     days_overdue: int = 0
 
+    @property
+    def is_stale(self) -> bool:
+        """Tasks overdue by 7 or more days are considered stale."""
+        return self.days_overdue >= 7
+
 
 class TimeBlock(BaseModel):
     """A free-time window derived from Google Calendar."""

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.07.22.23] - 2026-07-22
+
+### Added
+
+- **triage**: Implement 1-3 day recency window and 7-day staleness threshold heuristics across `Task.is_stale`, `LLMService` prompt rules, and `src/tui.py` stale badge styling.
+
 ## [v26.07.22.22] - 2026-07-22
 
 ### Added
