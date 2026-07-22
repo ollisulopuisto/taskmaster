@@ -164,7 +164,10 @@ class GCalService:
     @staticmethod
     def _parse_dt(value: str) -> datetime | None:
         try:
-            return datetime.fromisoformat(value)
+            dt = datetime.fromisoformat(value)
+            if dt.tzinfo is None:
+                return dt.replace(tzinfo=UTC)
+            return dt
         except ValueError:
             return None
 

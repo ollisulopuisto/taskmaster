@@ -328,3 +328,9 @@ class TestGCalAuth:
                     credentials_path=str(tmp_path / "nope.json"),
                     token_path=str(tmp_path / "token.json"),
                 )
+
+    def test_parse_dt_handles_naive_date_strings(self) -> None:
+        dt = GCalService._parse_dt("2026-07-22")
+        assert dt is not None
+        assert dt.tzinfo is not None
+        assert dt.year == 2026 and dt.month == 7 and dt.day == 22

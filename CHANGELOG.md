@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.07.22.29] - 2026-07-22
+
+### Fixed
+
+- **gcal**: Attach UTC timezone info to offset-naive datetimes (such as all-day events `"YYYY-MM-DD"`) in `GCalService._parse_dt()`, preventing `TypeError: can't compare offset-naive and offset-aware datetimes` during free busy calculations.
+
 ## [v26.07.22.28] - 2026-07-22
 
 ### Fixed
