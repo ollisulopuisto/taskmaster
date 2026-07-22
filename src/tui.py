@@ -86,12 +86,19 @@ class TaskMasterApp(App):
         yield Header(show_clock=True)
         with TabbedContent(initial="tab-morning", id="main-tabs"):
             with TabPane("Morning Triage", id="tab-morning"):
-                yield Button(
-                    "⚡ Generate Plan",
-                    id="btn-generate-plan",
-                    variant="primary",
-                    classes="action-btn",
-                )
+                with Horizontal():
+                    yield Button(
+                        "⚡ Generate Plan",
+                        id="btn-generate-plan",
+                        variant="primary",
+                        classes="action-btn",
+                    )
+                    yield Button(
+                        "💾 Confirm & Sync to Todoist",
+                        id="btn-sync-plan",
+                        variant="success",
+                        classes="action-btn",
+                    )
                 with Horizontal():
                     with VerticalScroll(id="schedule-container", classes="panel-box"):
                         yield Static(
@@ -133,10 +140,50 @@ class TaskMasterApp(App):
         button_id = event.button.id
         if button_id == "btn-generate-plan":
             await self.action_generate_plan()
+        elif button_id == "btn-sync-plan":
+            await self.action_sync_plan()
         elif button_id == "btn-submit-debrief":
             await self.action_submit_debrief()
         elif button_id == "btn-fetch-debug":
             await self.action_fetch_debug()
+
+    def render_plan_table(self) -> None:
+        """Render the 1-3-5 plan and proposed postponed tasks table."""
+        plan_text = self.query_one("#plan-text", Static)
+        if not self.morning_plan:
+            plan_text.update("No plan generated yet.")
+            return
+
+        plan = self.morning_plan
+        plan_table = Table(
+            title=f"🎯 1-3-5 Daily Plan ({plan.quadrant} / {plan.domain})", expand=True
+        )
+        plan_table.add_column("Category", style="bold cyan", width=16)
+        plan_table.add_column("Task Content", style="white")
+
+        for t in plan.big:
+            plan_table.add_row("[bold red]BIG (1)[/bold red]", f"[bold]{t.content}[/bold]")
+        for t in plan.medium:
+            plan_table.add_row("[yellow]MEDIUM (3)[/yellow]", t.content)
+        for t in plan.small:
+            plan_table.add_row("[green]SMALL (5)[/green]", t.content)
+        for t in plan.postponed:
+            plan_table.add_row("[dim magenta]POSTPONED[/dim magenta]", f"[dim]{t.content}[/dim]")
+
+        plan_text.update(plan_table)
+
+    async def action_sync_plan(self) -> None:
+        plan_text = self.query_one("#plan-text", Static)
+        if not self.morning_plan:
+            plan_text.update("[yellow]Generate a plan first before syncing.[/yellow]")
+            return
+
+        todoist, _, _ = get_services()
+        from datetime import timedelta
+
+        tomorrow = datetime.now().date() + timedelta(days=1)
+        todoist.sync_plan_priorities(self.morning_plan, tomorrow=tomorrow)
+        plan_text.update("[bold green]✔ Plan synced to Todoist![/bold green]")
 
     async def action_generate_plan(self) -> None:
         sched_text = self.query_one("#schedule-text", Static)
@@ -183,21 +230,7 @@ class TaskMasterApp(App):
         # Call LLM
         plan = llm.plan_triage(tasks=tasks, free_blocks=free_blocks)
         self.morning_plan = plan
-
-        plan_table = Table(
-            title=f"🎯 1-3-5 Daily Plan ({plan.quadrant} / {plan.domain})", expand=True
-        )
-        plan_table.add_column("Category", style="bold cyan", width=12)
-        plan_table.add_column("Task Content", style="white")
-
-        for t in plan.big:
-            plan_table.add_row("[bold red]BIG (1)[/bold red]", f"[bold]{t.content}[/bold]")
-        for t in plan.medium:
-            plan_table.add_row("[yellow]MEDIUM (3)[/yellow]", t.content)
-        for t in plan.small:
-            plan_table.add_row("[green]SMALL (5)[/green]", t.content)
-
-        plan_text.update(plan_table)
+        self.render_plan_table()
 
         # Populate Evening debrief container
         self.all_tasks = plan.big + plan.medium + plan.small

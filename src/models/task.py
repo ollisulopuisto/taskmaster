@@ -20,6 +20,9 @@ class Task(BaseModel):
     due_date: date | None = None
     labels: list[str] = []
     priority: int = 1
+    duration_minutes: int | None = None
+    is_overdue: bool = False
+    days_overdue: int = 0
 
 
 class TimeBlock(BaseModel):
@@ -30,10 +33,58 @@ class TimeBlock(BaseModel):
 
 
 class TriagePlan(BaseModel):
-    """Structured LLM output: the proposed daily plan."""
+    """Structured LLM output and interactive user plan."""
 
     big: list[Task] = []
     medium: list[Task] = []
     small: list[Task] = []
+    postponed: list[Task] = []
     quadrant: Quadrant = "not_urgent_important"
     domain: Domain = "civilian"
+
+    def reassign_task(
+        self, task_id: str, target: Literal["big", "medium", "small", "postponed"]
+    ) -> TriagePlan:
+        """Reassign a task to a target category, auto-shifting overflow tasks."""
+        # Collect all tasks currently across all categories
+        all_map = {t.id: t for t in (self.big + self.medium + self.small + self.postponed)}
+        if task_id not in all_map:
+            return self
+
+        target_task = all_map[task_id]
+
+        # Filter out target_task from current lists
+        big_list = [t for t in self.big if t.id != task_id]
+        medium_list = [t for t in self.medium if t.id != task_id]
+        small_list = [t for t in self.small if t.id != task_id]
+        postponed_list = [t for t in self.postponed if t.id != task_id]
+
+        if target == "big":
+            # Demote existing big task to medium
+            displaced = big_list
+            big_list = [target_task]
+            medium_list = displaced + medium_list
+        elif target == "medium":
+            medium_list.insert(0, target_task)
+        elif target == "small":
+            small_list.insert(0, target_task)
+        elif target == "postponed":
+            postponed_list.insert(0, target_task)
+
+        # Enforce capacity limits: medium max 3, small max 5
+        while len(medium_list) > 3:
+            overflow = medium_list.pop()
+            small_list.insert(0, overflow)
+
+        while len(small_list) > 5:
+            overflow = small_list.pop()
+            postponed_list.insert(0, overflow)
+
+        return TriagePlan(
+            big=big_list,
+            medium=medium_list,
+            small=small_list,
+            postponed=postponed_list,
+            quadrant=self.quadrant,
+            domain=self.domain,
+        )

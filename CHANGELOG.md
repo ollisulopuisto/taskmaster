@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.07.22.22] - 2026-07-22
+
+### Added
+
+- **models**: Add `duration_minutes`, `is_overdue`, `days_overdue` to `Task`, add `postponed` list to `TriagePlan`, and implement pure Python `reassign_task` for instant local reordering and capacity enforcement.
+- **services**: Parse duration & overdue metadata in `TodoistService`, format duration & overdue info in `LLMService` prompt, and add `sync_plan_priorities` to sync P1/P2/P3 priorities and postpone unassigned tasks back to Todoist.
+- **tui**: Render proposed postponed tasks and add `💾 Confirm & Sync to Todoist` button in `src/tui.py`.
+
 ## [v26.07.22.21] - 2026-07-22
 
 ### Fixed

@@ -11,6 +11,7 @@ from datetime import date, datetime
 from todoist_api_python.api import TodoistAPI
 
 from models.task import Task as InternalTask
+from models.task import TriagePlan
 
 
 class TodoistService:
@@ -47,6 +48,17 @@ class TodoistService:
                 if due is None or due > reference:
                     continue
 
+                is_overdue = due < reference
+                days_overdue = (reference - due).days if is_overdue else 0
+
+                duration_minutes = None
+                dur = getattr(raw, "duration", None)
+                if dur is not None:
+                    amt = getattr(dur, "amount", None)
+                    unit = getattr(dur, "unit", "minute")
+                    if amt is not None:
+                        duration_minutes = amt * 60 if unit == "hour" else amt
+
                 normalized.append(
                     InternalTask(
                         id=raw.id,
@@ -55,9 +67,29 @@ class TodoistService:
                         due_date=due,
                         labels=list(raw.labels) if raw.labels else [],
                         priority=raw.priority or 1,
+                        duration_minutes=duration_minutes,
+                        is_overdue=is_overdue,
+                        days_overdue=days_overdue,
                     )
                 )
         return normalized
+
+    def sync_plan_priorities(self, plan: TriagePlan, tomorrow: date) -> None:
+        """Sync accepted 1-3-5 plan priorities and postponed tasks back to Todoist.
+
+        BIG -> P1 (priority=4)
+        MEDIUM -> P2 (priority=3)
+        SMALL -> P3 (priority=2)
+        POSTPONED -> postponed to tomorrow
+        """
+        for t in plan.big:
+            self._api.update_task(task_id=t.id, priority=4)
+        for t in plan.medium:
+            self._api.update_task(task_id=t.id, priority=3)
+        for t in plan.small:
+            self._api.update_task(task_id=t.id, priority=2)
+        for t in plan.postponed:
+            self.postpone_task(task_id=t.id, new_date=tomorrow)
 
     @staticmethod
     def _parse_date(value: str | date | datetime) -> date | None:

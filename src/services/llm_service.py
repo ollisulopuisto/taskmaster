@@ -61,11 +61,10 @@ class LLMService:
                     "role": "system",
                     "content": (
                         "Olet päivän triage-assistentti. Käyttäjä antaa tehtäviä "
-                        "ja vapaa-aikoja. Valitse annetuista tehtävistä 1-3-5 -suunnitelma: "
-                        "1 Big, 3 Medium ja 5 Small -tehtävää. "
-                        "Palauta validi JSON, jossa 'big', 'medium' ja 'small' ovat "
-                        "tehtäväolioiden listoja "
-                        "(id, content, project_id, due_date, labels, priority)."
+                        "(P1-P4 prioriteetilla, kestolla ja myöhästymistiedolla) ja vapaa-aikoja. "
+                        "Valitse 1-3-5 -suunnitelma: 1 Big, 3 Medium ja 5 Small -tehtävää. "
+                        "Laita loput tehtävät 'postponed'-listalle. "
+                        "Palauta validi JSON: 'big', 'medium', 'small' ja 'postponed'."
                     ),
                 },
                 {"role": "user", "content": prompt},
@@ -76,13 +75,16 @@ class LLMService:
         return response
 
     @staticmethod
-    def _build_prompt(tasks: list[Task], free_blocks: list[Any]) -> str:
-        task_lines = (
-            "\n".join(
-                f"- [{t.id}] {t.content} (due: {t.due_date}, priority: {t.priority})" for t in tasks
-            )
-            or "(no tasks due today)"
-        )
+    def _format_task(t: Task) -> str:
+        prio_str = f"P{5 - t.priority}" if 1 <= t.priority <= 4 else f"P{t.priority}"
+        overdue_str = f" [OVERDUE by {t.days_overdue}d]" if t.is_overdue else ""
+        dur_str = f", dur: {t.duration_minutes}m" if t.duration_minutes else ""
+        info = f"(due: {t.due_date}{overdue_str}, priority: {prio_str}{dur_str})"
+        return f"- [{t.id}] {t.content} {info}"
+
+    @classmethod
+    def _build_prompt(cls, tasks: list[Task], free_blocks: list[Any]) -> str:
+        task_lines = "\n".join(cls._format_task(t) for t in tasks) or "(no tasks due today)"
 
         block_lines = (
             "\n".join(f"- {b.start} to {b.end}" for b in free_blocks)
@@ -92,5 +94,5 @@ class LLMService:
         return (
             f"Today's tasks:\n{task_lines}\n\n"
             f"Free time blocks:\n{block_lines}\n\n"
-            "Propose a 1-3-5 plan for today."
+            "Propose a 1-3-5 plan for today and list remaining tasks under postponed."
         )

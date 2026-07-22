@@ -148,3 +148,23 @@ class TestTodoistService:
         MockAPI.return_value.update_task.assert_called_once_with(
             task_id="abc-123", due_date="2026-07-01"
         )
+
+    def test_sync_plan_priorities_updates_todoist(self) -> None:
+        from models.task import TriagePlan
+
+        t_big = InternalTask(id="b1", content="Big", project_id="p1")
+        t_med = InternalTask(id="m1", content="Med", project_id="p1")
+        t_small = InternalTask(id="s1", content="Small", project_id="p1")
+        t_post = InternalTask(id="p1", content="Postponed", project_id="p1")
+
+        plan = TriagePlan(big=[t_big], medium=[t_med], small=[t_small], postponed=[t_post])
+
+        with patch("services.todoist_service.TodoistAPI") as MockAPI:
+            svc = self._service()
+            svc.sync_plan_priorities(plan, tomorrow=date(2026, 6, 29))
+
+            inst = MockAPI.return_value
+            inst.update_task.assert_any_call(task_id="b1", priority=4)
+            inst.update_task.assert_any_call(task_id="m1", priority=3)
+            inst.update_task.assert_any_call(task_id="s1", priority=2)
+            inst.update_task.assert_any_call(task_id="p1", due_date="2026-06-29")
