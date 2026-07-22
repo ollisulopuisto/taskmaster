@@ -16,7 +16,7 @@ API_BASE = "http://localhost:8002"
 def fetch_morning_payload() -> dict | None:
     """Call the FastAPI morning endpoint. Returns None on failure."""
     try:
-        response = requests.get(f"{API_BASE}/api/triage/morning", timeout=300)
+        response = requests.get(f"{API_BASE}/api/triage/morning", timeout=600)
         response.raise_for_status()
         return response.json()
     except requests.RequestException as exc:

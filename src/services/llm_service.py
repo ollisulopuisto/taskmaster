@@ -25,7 +25,7 @@ class LLMService:
     """Talks to a local LLM and returns a structured triage plan."""
 
     def __init__(
-        self, model: str, base_url: str, api_key: str = "ollama", timeout: float = 300.0
+        self, model: str, base_url: str, api_key: str = "ollama", timeout: float = 600.0
     ) -> None:
         raw_client = OpenAI(
             base_url=base_url,

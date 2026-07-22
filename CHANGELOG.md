@@ -5,12 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
-## [v26.07.22.16] - 2026-07-22
+## [v26.07.22.17] - 2026-07-22
 
-### Added
+### Fixed
 
-- **cli**: Add active Rich status spinner during LLM plan generation.
-- **config**: Set client and frontend timeouts to 300s to support local reasoning model execution.
+- **llm**: Increase HTTP client timeout to 600s in `LLMService` and `app.py` to allow full Gemma 12B reasoning runs (~5–6 minutes) to finish without timing out.
 
 ## [v26.06.29.4] - 2026-06-29
 
