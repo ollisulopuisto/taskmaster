@@ -172,16 +172,16 @@ class TestLLMService:
         assert captured["init_kwargs"]["api_key"] == "custom-key"
         assert captured["init_kwargs"]["timeout"].read == 90.0
 
-    def test_from_env_reads_openrouter_or_gemini_vars(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_from_env_reads_gemini_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """LLMService.from_env() prioritizes LLM_BASE_URL, LLM_MODEL, and LLM_API_KEY."""
-        monkeypatch.setenv("LLM_BASE_URL", "https://openrouter.ai/api/v1")
-        monkeypatch.setenv("LLM_MODEL", "google/gemini-2.0-flash-001")
-        monkeypatch.setenv("LLM_API_KEY", "sk-or-test-key")
+        monkeypatch.setenv(
+            "LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/"
+        )
+        monkeypatch.setenv("LLM_MODEL", "gemini-2.0-flash")
+        monkeypatch.setenv("LLM_API_KEY", "AIzaSy-test-key")
 
         service = LLMService.from_env()
-        assert service._model == "google/gemini-2.0-flash-001"
+        assert service._model == "gemini-2.0-flash"
 
     def test_from_env_falls_back_to_ollama_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """LLMService.from_env() falls back to OLLAMA_* when LLM_* are unset."""

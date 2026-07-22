@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.07.22.20] - 2026-07-22
+
+### Changed
+
+- **llm**: Clean up `.env.example` and tests to focus purely on local LLM vs direct Google Gemini API without any third-party services.
+
 ## [v26.07.22.19] - 2026-07-22
 
 ### Added
