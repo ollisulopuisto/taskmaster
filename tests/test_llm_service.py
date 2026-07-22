@@ -172,6 +172,28 @@ class TestLLMService:
         assert captured["init_kwargs"]["api_key"] == "custom-key"
         assert captured["init_kwargs"]["timeout"].read == 90.0
 
+    def test_from_env_reads_openrouter_or_gemini_vars(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """LLMService.from_env() prioritizes LLM_BASE_URL, LLM_MODEL, and LLM_API_KEY."""
+        monkeypatch.setenv("LLM_BASE_URL", "https://openrouter.ai/api/v1")
+        monkeypatch.setenv("LLM_MODEL", "google/gemini-2.0-flash-001")
+        monkeypatch.setenv("LLM_API_KEY", "sk-or-test-key")
+
+        service = LLMService.from_env()
+        assert service._model == "google/gemini-2.0-flash-001"
+
+    def test_from_env_falls_back_to_ollama_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """LLMService.from_env() falls back to OLLAMA_* when LLM_* are unset."""
+        monkeypatch.delenv("LLM_BASE_URL", raising=False)
+        monkeypatch.delenv("LLM_MODEL", raising=False)
+        monkeypatch.delenv("LLM_API_KEY", raising=False)
+        monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:8000/v1")
+        monkeypatch.setenv("OLLAMA_MODEL", "gemma4")
+
+        service = LLMService.from_env()
+        assert service._model == "gemma4"
+
 
 class TestBuildPrompt:
     """Direct tests for the `_build_prompt` static helper."""

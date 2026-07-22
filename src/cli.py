@@ -37,10 +37,7 @@ def get_services() -> tuple[TodoistService, GCalService, LLMService]:
         calendar_ids=calendar_ids,
         credentials_path=os.getenv("GOOGLE_CREDENTIALS_PATH", "credentials.json"),
     )
-    llm = LLMService(
-        model=os.getenv("OLLAMA_MODEL", "gemma4"),
-        base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:8000/v1"),
-    )
+    llm = LLMService.from_env()
     return todoist, gcal, llm
 
 

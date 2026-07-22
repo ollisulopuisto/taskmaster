@@ -47,10 +47,7 @@ def _build_dependencies() -> dict[str, Any]:
             calendar_ids=calendar_ids,
             credentials_path=os.getenv("GOOGLE_CREDENTIALS_PATH", "credentials.json"),
         ),
-        "llm": LLMService(
-            model=os.getenv("OLLAMA_MODEL", "llama3"),
-            base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:8000/v1"),
-        ),
+        "llm": LLMService.from_env(),
     }
 
 

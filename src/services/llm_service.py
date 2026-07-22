@@ -12,6 +12,7 @@ switch to `Mode.TOOLS` if your server supports function calling natively.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import httpx
@@ -22,7 +23,7 @@ from models.task import Task, TriagePlan
 
 
 class LLMService:
-    """Talks to a local LLM and returns a structured triage plan."""
+    """Talks to any OpenAI-compatible LLM and returns a structured triage plan."""
 
     def __init__(
         self, model: str, base_url: str, api_key: str = "ollama", timeout: float = 600.0
@@ -34,6 +35,21 @@ class LLMService:
         )
         self._client = instructor.from_openai(raw_client, mode=instructor.Mode.MD_JSON)
         self._model = model
+
+    @classmethod
+    def from_env(cls) -> LLMService:
+        """Instantiate LLMService from environment variables (.env).
+
+        Supports local LLMs (llama-server / Ollama) as well as OpenRouter,
+        Google Gemini OpenAI endpoint, or OpenAI directly without code duplication.
+        """
+        model = os.getenv("LLM_MODEL") or os.getenv("OLLAMA_MODEL", "gemma4")
+        base_url = os.getenv("LLM_BASE_URL") or os.getenv(
+            "OLLAMA_BASE_URL", "http://localhost:8000/v1"
+        )
+        api_key = os.getenv("LLM_API_KEY") or os.getenv("OLLAMA_API_KEY", "ollama")
+        timeout = float(os.getenv("LLM_TIMEOUT", "600.0"))
+        return cls(model=model, base_url=base_url, api_key=api_key, timeout=timeout)
 
     def plan_triage(self, tasks: list[Task], free_blocks: list[Any]) -> TriagePlan:
         """Ask the LLM to propose a 1-3-5 plan for today."""

@@ -74,7 +74,7 @@ class TestBuildDependencies:
         ):
             _build_dependencies()
 
-        MockLLM.assert_called_once_with(model="mistral", base_url="http://ollama.local:11434/v1")
+        MockLLM.from_env.assert_called_once()
 
     def test_uses_env_credentials_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("GOOGLE_CREDENTIALS_PATH", "/tmp/my-oauth.json")
@@ -116,6 +116,7 @@ class TestMorningEndpoint:
             patch("api.router.GCalService") as MockGCal,
             patch("api.router.LLMService") as MockLLM,
         ):
+            MockLLM.from_env.return_value = MockLLM.return_value
             MockTodoist.return_value.get_todays_tasks.return_value = []
             MockGCal.return_value.get_todays_events.return_value = []
             MockGCal.return_value.get_free_time_blocks.return_value = []
@@ -144,6 +145,7 @@ class TestMorningEndpoint:
             patch("api.router.GCalService") as MockGCal,
             patch("api.router.LLMService") as MockLLM,
         ):
+            MockLLM.from_env.return_value = MockLLM.return_value
             MockTodoist.return_value.get_todays_tasks.return_value = tasks
             MockGCal.return_value.get_todays_events.return_value = []
             MockGCal.return_value.get_free_time_blocks.return_value = []
@@ -174,6 +176,7 @@ class TestMorningEndpoint:
             patch("api.router.GCalService") as MockGCal,
             patch("api.router.LLMService") as MockLLM,
         ):
+            MockLLM.from_env.return_value = MockLLM.return_value
             MockTodoist.return_value.get_todays_tasks.return_value = []
             MockGCal.return_value.get_todays_events.return_value = fake_events
             MockGCal.return_value.get_free_time_blocks.return_value = fake_blocks

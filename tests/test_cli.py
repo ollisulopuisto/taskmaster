@@ -40,6 +40,7 @@ def test_cli_auto_mode(capsys, pytestconfig):
         mock_llm = MagicMock()
         mock_llm.plan_triage.return_value = mock_plan
         mock_llm_cls.return_value = mock_llm
+        mock_llm_cls.from_env.return_value = mock_llm
 
         plan = run_cli(auto=True)
 
