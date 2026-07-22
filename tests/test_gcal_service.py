@@ -291,7 +291,10 @@ class TestGCalAuth:
             ["https://www.googleapis.com/auth/calendar.readonly"],
         )
         MockFlow.from_client_secrets_file.return_value.run_local_server.assert_called_once_with(
-            port=0
+            port=0,
+            success_message=(
+                "Kirjautuminen onnistui! Voit sulkea tämän välilehden ja palata sovellukseen."
+            ),
         )
 
     def test_consent_flow_writes_token_file(self, tmp_path) -> None:

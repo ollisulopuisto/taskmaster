@@ -33,10 +33,10 @@ class TodoistService:
         `today` is injectable for deterministic tests.
         """
         reference = today or date.today()
-        raw_pages = self._api.get_tasks()
+        paginator = self._api.get_tasks()
 
         normalized: list[InternalTask] = []
-        for page in raw_pages:
+        for page in paginator:
             for raw in page:
                 if raw.completed_at is not None:
                     continue
@@ -60,8 +60,16 @@ class TodoistService:
         return normalized
 
     @staticmethod
-    def _parse_date(value: str) -> date | None:
-        """Parse a Todoist date string (date or datetime) into a date."""
+    def _parse_date(value: str | date | datetime) -> date | None:
+        """Parse a Todoist date value into a date.
+
+        The SDK may return either a plain ``datetime.date`` / ``datetime.datetime``
+        object (newer versions) or an ISO-8601 string (older versions / mocked tests).
+        """
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
         try:
             if "T" in value:
                 return datetime.fromisoformat(value).date()

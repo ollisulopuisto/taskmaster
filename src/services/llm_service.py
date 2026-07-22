@@ -32,7 +32,7 @@ class LLMService:
             api_key=api_key,
             timeout=httpx.Timeout(timeout, connect=10.0, read=timeout),
         )
-        self._client = instructor.from_openai(raw_client, mode=instructor.Mode.JSON)
+        self._client = instructor.from_openai(raw_client, mode=instructor.Mode.MD_JSON)
         self._model = model
 
     def plan_triage(self, tasks: list[Task], free_blocks: list[Any]) -> TriagePlan:
@@ -44,16 +44,19 @@ class LLMService:
                 {
                     "role": "system",
                     "content": (
-                        "Olet päivän triage-assisentti. Käyttäjä antaa tehtäviä "
-                        "ja vapaa-aikoja. Palauta VAIN validi JSON, joka sisältää "
-                        "avaimet: big (merkkijonolista), medium (lista), small (lista). "
-                        "ÄLÄ lisää muuta tekstiä, kommentteja eikä markdown-merkintöjä."
+                        "Olet päivän triage-assistentti. Käyttäjä antaa tehtäviä "
+                        "ja vapaa-aikoja. Valitse annetuista tehtävistä 1-3-5 -suunnitelma: "
+                        "1 Big, 3 Medium ja 5 Small -tehtävää. "
+                        "Ole erittäin tiivis päättelyssäsi. "
+                        "Palauta validi JSON, jossa 'big', 'medium' ja 'small' ovat "
+                        "tehtäväolioiden listoja "
+                        "(id, content, project_id, due_date, labels, priority)."
                     ),
                 },
                 {"role": "user", "content": prompt},
             ],
             response_model=TriagePlan,
-            max_tokens=2048,
+            max_tokens=4096,
         )
         return response
 

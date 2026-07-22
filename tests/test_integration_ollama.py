@@ -129,7 +129,7 @@ class TestOllamaModeSelection:
         with patch("services.llm_service.instructor.from_openai", side_effect=spy_from_openai):
             LLMService(model="m", base_url="http://x")
 
-        assert captured["mode"] == instructor.Mode.JSON
+        assert captured["mode"] == instructor.Mode.MD_JSON
 
     def test_mode_json_enables_openai_compat_without_function_calling(self) -> None:
         """JSON mode works with servers that lack tool_calls protocol support."""

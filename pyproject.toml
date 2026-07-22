@@ -18,6 +18,7 @@ dependencies = [
     "pytest>=9.1.1",
     "pytest-mock>=3.15.1",
     "python-dotenv>=1.2.2",
+    "rich>=14.3.4",
     "ruff>=0.15.20",
     "streamlit>=1.58.0",
     "todoist-api-python>=4.0.0",
@@ -26,6 +27,7 @@ dependencies = [
 
 [project.scripts]
 taskmaster = "main:app"
+taskmaster-cli = "cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -48,4 +50,9 @@ pythonpath = ["src"]
 addopts = "-m \"not slow\""
 markers = [
     "slow: tests that hit real llama-server (may take 60s+)",
+]
+
+[dependency-groups]
+dev = [
+    "playwright>=1.61.0",
 ]

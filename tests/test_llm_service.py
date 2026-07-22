@@ -92,7 +92,7 @@ class TestLLMService:
         call_kwargs = fake_client.chat.completions.create.call_args.kwargs
         # instructor passes the pydantic model as response_model
         assert call_kwargs.get("response_model") is TriagePlan
-        assert call_kwargs.get("max_tokens") == 2048
+        assert call_kwargs.get("max_tokens") == 4096
 
     def test_plan_triage_handles_empty_task_list(self) -> None:
         fake_instructor = self._fake_instructor()
@@ -133,15 +133,15 @@ class TestLLMService:
                 self._service().plan_triage(tasks=[], free_blocks=[])
 
     def test_constructor_configures_instructor_json_mode(self) -> None:
-        """LLMService should use instructor.Mode.JSON for llama.cpp compatibility."""
+        """LLMService should use instructor.Mode.MD_JSON for llama.cpp compatibility."""
         with patch("services.llm_service.instructor") as mock_instructor:
             mock_instructor.from_openai.return_value = MagicMock()
-            mock_instructor.Mode.JSON = "json-mode"
+            mock_instructor.Mode.MD_JSON = "md-json-mode"
 
             LLMService(model="test", base_url="http://localhost:8000/v1")
 
             call_kwargs = mock_instructor.from_openai.call_args
-            assert call_kwargs.kwargs.get("mode") == "json-mode"
+            assert call_kwargs.kwargs.get("mode") == "md-json-mode"
 
     def test_constructor_uses_correct_model_name(self) -> None:
         """The model name passed to LLMService must reach the inner client."""

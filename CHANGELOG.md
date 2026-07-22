@@ -5,15 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
-## [Unreleased]
+## [v26.07.22.14] - 2026-07-22
 
 ### Fixed
 
-- Bump LLM max_tokens to 2048 to satisfy integration test (ca0ec27)
-
-### Tests
-
-- Add Ollama integration tests and expand LLM service coverage (9b15bef)
+- **llm**: Increase `max_tokens` to 4096 and refine system prompt to prevent `IncompleteOutputException` with reasoning models.
+- **launchagent**: Configure `llama-server` with `-ngl 99`, `-c 8192`, `--reasoning off`, and `--reasoning-budget 0` to eliminate generation timeouts.
 
 ## [v26.06.29.4] - 2026-06-29
 

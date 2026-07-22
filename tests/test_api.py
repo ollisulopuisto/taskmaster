@@ -13,6 +13,15 @@ from main import app
 from models.task import TriagePlan
 
 
+@pytest.fixture(autouse=True)
+def reset_router_deps():
+    import api.router
+
+    api.router._deps = None
+    yield
+    api.router._deps = None
+
+
 class TestBuildDependencies:
     """Verify that service construction reads live values from the environment."""
 

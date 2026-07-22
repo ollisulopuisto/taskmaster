@@ -21,6 +21,7 @@ import os
 from datetime import UTC, date, datetime
 from typing import Any
 
+from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
@@ -52,7 +53,7 @@ class GCalService:
             return creds
 
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(None)
+            creds.refresh(Request())
             self._save_token(creds)
             return creds
 
@@ -71,13 +72,27 @@ class GCalService:
                 "this file, or set GOOGLE_CREDENTIALS_PATH in .env."
             )
         flow = InstalledAppFlow.from_client_secrets_file(self._credentials_path, SCOPES)
-        creds = flow.run_local_server(port=0)
+        creds = flow.run_local_server(
+            port=0,
+            success_message=(
+                "Kirjautuminen onnistui! Voit sulkea tämän välilehden ja palata sovellukseen."
+            ),
+        )
         self._save_token(creds)
         return creds
 
     def _save_token(self, creds: Credentials) -> None:
         with open(self._token_path, "w") as fh:
             fh.write(creds.to_json())
+
+    def _safe_execute(self, request_factory: Any) -> Any:
+        """Execute a GCal API request with automatic reconnect on broken pipes."""
+        try:
+            return request_factory(self._service).execute()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            # Connection died while idle — rebuild service with fresh socket
+            self._service = build("calendar", "v3", credentials=self._load_credentials())
+            return request_factory(self._service).execute()
 
     def get_todays_events(self, *, today: date | None = None) -> list[dict[str, Any]]:
         """Return non-cancelled events occurring on `today` across all calendars."""
@@ -99,7 +114,8 @@ class GCalService:
                 if page_token:
                     kwargs["pageToken"] = page_token
 
-                response = self._service.events().list(**kwargs).execute()
+                current_kwargs = dict(kwargs)
+                response = self._safe_execute(lambda s, kw=current_kwargs: s.events().list(**kw))
                 for item in response.get("items", []):
                     if item.get("status") == "cancelled":
                         continue
@@ -130,7 +146,7 @@ class GCalService:
             "timeMax": day_end.isoformat(),
             "items": [{"id": cid} for cid in self._calendar_ids],
         }
-        response = self._service.freebusy().query(body=body).execute()
+        response = self._safe_execute(lambda s: s.freebusy().query(body=body))
 
         # Merge busy windows across all calendars
         busy: list[tuple[datetime, datetime]] = []

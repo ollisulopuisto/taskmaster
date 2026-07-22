@@ -77,7 +77,7 @@ class TestTodoistService:
             instance = MockAPI.return_value
             instance.get_tasks.return_value = iter([[today, future]])
 
-            result = self._service().get_todays_tasks()
+            result = self._service().get_todays_tasks(today=date(2026, 6, 28))
 
         assert [t.id for t in result] == ["1"]
 

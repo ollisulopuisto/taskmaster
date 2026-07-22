@@ -1,9 +1,9 @@
 """Streamlit frontend for TaskMaster Triage Helper.
 
-Two tabs:
+Three tabs:
 - Morning Triage: shows today's GCal schedule and the LLM's proposed 1-3-5 plan.
 - Evening Debrief: check off what got done, roll incomplete items to tomorrow.
-"""
+- Debug: raw ingested data from each service + LLM prompt."""
 
 from __future__ import annotations
 
@@ -16,11 +16,22 @@ API_BASE = "http://localhost:8002"
 def fetch_morning_payload() -> dict | None:
     """Call the FastAPI morning endpoint. Returns None on failure."""
     try:
-        response = requests.get(f"{API_BASE}/api/triage/morning", timeout=60)
+        response = requests.get(f"{API_BASE}/api/triage/morning", timeout=180)
         response.raise_for_status()
         return response.json()
     except requests.RequestException as exc:
         st.error(f"Failed to fetch morning payload: {exc}")
+        return None
+
+
+def fetch_debug_payload() -> dict | None:
+    """Call the FastAPI debug endpoint. Returns raw service data, no LLM call."""
+    try:
+        response = requests.get(f"{API_BASE}/api/triage/debug", timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as exc:
+        st.error(f"Failed to fetch debug data: {exc}")
         return None
 
 
@@ -132,14 +143,87 @@ def render_evening_tab() -> None:
             st.success(f"Logged {len(completed)} completed, {len(rolled_over)} rolled over.")
 
 
+def render_debug_tab() -> None:
+    st.header("🔍 Debug — Raw ingested data")
+    st.markdown(
+        "Fetches raw data from each service **without** calling the LLM. "
+        "Useful for verifying what's being ingested."
+    )
+
+    if st.button("Fetch raw data", type="secondary"):
+        with st.spinner("Fetching from Todoist + Google Calendar..."):
+            data = fetch_debug_payload()
+        if data is not None:
+            st.session_state["debug_payload"] = data
+
+    data = st.session_state.get("debug_payload")
+    if data is None:
+        st.info("Click **Fetch raw data** to inspect what the app ingests.")
+        return
+
+    # Config
+    with st.expander("⚙️ Config", expanded=True):
+        cfg = data.get("config", {})
+        if cfg:
+            st.table([{"Setting": str(k), "Value": str(v)} for k, v in cfg.items()])
+        else:
+            st.warning("No configuration data returned.")
+
+    # Todoist
+    with st.expander(
+        f"📋 Todoist tasks ({data['todoist']['task_count']} due today)", expanded=True
+    ):
+        tasks = data["todoist"]["tasks"]
+        if tasks:
+            for t in tasks:
+                priority_emoji = {4: "🔴", 3: "🟠", 2: "🟡", 1: "⚪"}.get(t["priority"], "⚪")
+                st.markdown(
+                    f"{priority_emoji} **{t['content']}** — due `{t['due_date']}` · "
+                    f"labels: `{t['labels']}`"
+                )
+        else:
+            st.markdown("_No tasks due today._")
+
+    # Google Calendar
+    gcal_title = (
+        f"📅 Google Calendar ({data['gcal']['event_count']} events, "
+        f"{data['gcal']['free_block_count']} free blocks)"
+    )
+    with st.expander(gcal_title, expanded=True):
+        events = data["gcal"]["events"]
+        if events:
+            st.markdown("**Events**")
+            for e in events:
+                start = e["start"].get("dateTime") or e["start"].get("date") or "?"
+                st.markdown(f"- **{e['summary']}** @ `{start}`")
+        else:
+            st.markdown("_No events today._")
+
+        blocks = data["gcal"]["free_blocks"]
+        if blocks:
+            st.markdown("**Free blocks**")
+            for b in blocks:
+                st.markdown(f"- `{b['start']}` → `{b['end']}`")
+
+    # LLM prompt
+    with st.expander("🤖 LLM prompt (what gets sent to the model)", expanded=False):
+        st.code(data.get("llm_prompt", ""), language="text")
+
+    # Full JSON
+    with st.expander("📄 Full raw JSON", expanded=False):
+        st.json(data)
+
+
 def main() -> None:
     st.set_page_config(page_title="TaskMaster", layout="wide")
     st.title("TaskMaster Triage Helper")
-    morning_tab, evening_tab = st.tabs(["Morning Triage", "Evening Debrief"])
+    morning_tab, evening_tab, debug_tab = st.tabs(["Morning Triage", "Evening Debrief", "🔍 Debug"])
     with morning_tab:
         render_morning_tab()
     with evening_tab:
         render_evening_tab()
+    with debug_tab:
+        render_debug_tab()
 
 
 if __name__ == "__main__":
