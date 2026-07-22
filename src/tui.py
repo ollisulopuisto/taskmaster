@@ -211,36 +211,43 @@ class TaskMasterApp(App):
 
         # Mount interactive reassign buttons for each task
         all_items = [
-            ("BIG", plan.big),
-            ("MEDIUM", plan.medium),
-            ("SMALL", plan.small),
-            ("POSTPONED", plan.postponed),
+            ("BIG", "big", plan.big),
+            ("MEDIUM", "medium", plan.medium),
+            ("SMALL", "small", plan.small),
+            ("POSTPONED", "postponed", plan.postponed),
         ]
-        for cat_name, task_list in all_items:
+        for cat_name, cat_key, task_list in all_items:
             for t in task_list:
+                btn_big = Button(
+                    "✓ BIG" if cat_key == "big" else "1 Big",
+                    id=f"btn-reassign-big-{t.id}",
+                    variant="error" if cat_key == "big" else "default",
+                    classes="mini-btn active-btn" if cat_key == "big" else "mini-btn",
+                )
+                btn_med = Button(
+                    "✓ MED" if cat_key == "medium" else "3 Med",
+                    id=f"btn-reassign-medium-{t.id}",
+                    variant="warning" if cat_key == "medium" else "default",
+                    classes="mini-btn active-btn" if cat_key == "medium" else "mini-btn",
+                )
+                btn_small = Button(
+                    "✓ SMALL" if cat_key == "small" else "5 Small",
+                    id=f"btn-reassign-small-{t.id}",
+                    variant="success" if cat_key == "small" else "default",
+                    classes="mini-btn active-btn" if cat_key == "small" else "mini-btn",
+                )
+                btn_post = Button(
+                    "✓ POST" if cat_key == "postponed" else "P Postpone",
+                    id=f"btn-reassign-postponed-{t.id}",
+                    variant="primary" if cat_key == "postponed" else "default",
+                    classes="mini-btn active-btn" if cat_key == "postponed" else "mini-btn",
+                )
                 row = Horizontal(
                     Static(f"[{cat_name}] [bold]{t.content}[/bold]", classes="task-label"),
-                    Button(
-                        "1 Big", id=f"btn-reassign-big-{t.id}", variant="error", classes="mini-btn"
-                    ),
-                    Button(
-                        "3 Med",
-                        id=f"btn-reassign-medium-{t.id}",
-                        variant="warning",
-                        classes="mini-btn",
-                    ),
-                    Button(
-                        "5 Small",
-                        id=f"btn-reassign-small-{t.id}",
-                        variant="success",
-                        classes="mini-btn",
-                    ),
-                    Button(
-                        "P Postpone",
-                        id=f"btn-reassign-postponed-{t.id}",
-                        variant="default",
-                        classes="mini-btn",
-                    ),
+                    btn_big,
+                    btn_med,
+                    btn_small,
+                    btn_post,
                     classes="task-row",
                 )
                 await plan_container.mount(row)

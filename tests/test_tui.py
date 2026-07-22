@@ -115,3 +115,16 @@ async def test_tui_interactive_reassign_task(mock_services):
         await pilot.pause()
 
         assert app.morning_plan.big[0].id == "t2"
+
+
+@pytest.mark.anyio
+async def test_tui_button_labels_reflect_current_task_state(mock_services):
+    """Button for current task category displays checkmark label (e.g. ✓ BIG)."""
+    app = TaskMasterApp()
+    async with app.run_test() as pilot:
+        await pilot.click("#btn-generate-plan")
+        await pilot.pause()
+
+        # Task t1 is in BIG -> #btn-reassign-big-t1 should show "✓ BIG"
+        btn_big_t1 = app.query_one("#btn-reassign-big-t1", Button)
+        assert "✓ BIG" in str(btn_big_t1.label) or "✓" in str(btn_big_t1.label)
