@@ -47,7 +47,6 @@ class LLMService:
                         "Olet päivän triage-assistentti. Käyttäjä antaa tehtäviä "
                         "ja vapaa-aikoja. Valitse annetuista tehtävistä 1-3-5 -suunnitelma: "
                         "1 Big, 3 Medium ja 5 Small -tehtävää. "
-                        "Ole erittäin tiivis päättelyssäsi. "
                         "Palauta validi JSON, jossa 'big', 'medium' ja 'small' ovat "
                         "tehtäväolioiden listoja "
                         "(id, content, project_id, due_date, labels, priority)."

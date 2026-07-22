@@ -5,12 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
-## [v26.07.22.14] - 2026-07-22
+## [v26.07.22.15] - 2026-07-22
 
 ### Fixed
 
-- **llm**: Increase `max_tokens` to 4096 and refine system prompt to prevent `IncompleteOutputException` with reasoning models.
-- **launchagent**: Configure `llama-server` with `-ngl 99`, `-c 8192`, `--reasoning off`, and `--reasoning-budget 0` to eliminate generation timeouts.
+- **launchagent**: Restore Gemma reasoning settings intact; keep `-ngl 99` GPU offloading enabled.
+- **llm**: Set `max_tokens=4096` in `LLMService` to accommodate full reasoning output without truncating response.
 
 ## [v26.06.29.4] - 2026-06-29
 
