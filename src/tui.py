@@ -51,6 +51,12 @@ class TaskMasterApp(App):
 
     TITLE = "TaskMaster Triage Helper"
     SUB_TITLE = "Terminal UI (Mouse & Keyboard Enabled)"
+    BINDINGS = [
+        ("g", "generate_plan", "⚡ Generate Plan"),
+        ("s", "sync_plan", "💾 Confirm & Sync"),
+        ("q", "quit", "Quit"),
+    ]
+
     CSS = """
     Screen {
         background: $surface;
@@ -63,9 +69,26 @@ class TaskMasterApp(App):
         padding: 1 2;
         height: 1fr;
     }
-    .action-btn {
+    .top-bar {
+        height: 3;
         margin: 1 0;
-        width: 100%;
+    }
+    .action-btn {
+        width: 1fr;
+        margin: 0 1;
+    }
+    .task-row {
+        height: 3;
+        margin: 1 0;
+        border-bottom: solid $primary;
+    }
+    .task-label {
+        width: 1fr;
+        content-align: left middle;
+    }
+    .mini-btn {
+        min-width: 9;
+        margin: 0 1;
     }
     #schedule-container {
         width: 1fr;
@@ -86,15 +109,15 @@ class TaskMasterApp(App):
         yield Header(show_clock=True)
         with TabbedContent(initial="tab-morning", id="main-tabs"):
             with TabPane("Morning Triage", id="tab-morning"):
-                with Horizontal():
+                with Horizontal(classes="top-bar"):
                     yield Button(
-                        "⚡ Generate Plan",
+                        "⚡ Generate Plan (G)",
                         id="btn-generate-plan",
                         variant="primary",
                         classes="action-btn",
                     )
                     yield Button(
-                        "💾 Confirm & Sync to Todoist",
+                        "💾 Confirm & Sync to Todoist (S)",
                         id="btn-sync-plan",
                         variant="success",
                         classes="action-btn",
@@ -102,7 +125,7 @@ class TaskMasterApp(App):
                 with Horizontal():
                     with VerticalScroll(id="schedule-container", classes="panel-box"):
                         yield Static(
-                            "Click [bold cyan]Generate Plan[/bold cyan] to load today's schedule.",
+                            "Click [bold cyan]Generate Plan[/bold cyan] or press [bold]G[/bold].",
                             id="schedule-text",
                         )
                     with VerticalScroll(id="plan-container", classes="panel-box"):
@@ -197,10 +220,28 @@ class TaskMasterApp(App):
             for t in task_list:
                 row = Horizontal(
                     Static(f"[{cat_name}] [bold]{t.content}[/bold]", classes="task-label"),
-                    Button("1 Big", id=f"btn-reassign-big-{t.id}", variant="error"),
-                    Button("3 Med", id=f"btn-reassign-medium-{t.id}", variant="warning"),
-                    Button("5 Small", id=f"btn-reassign-small-{t.id}", variant="success"),
-                    Button("P Postpone", id=f"btn-reassign-postponed-{t.id}", variant="default"),
+                    Button(
+                        "1 Big", id=f"btn-reassign-big-{t.id}", variant="error", classes="mini-btn"
+                    ),
+                    Button(
+                        "3 Med",
+                        id=f"btn-reassign-medium-{t.id}",
+                        variant="warning",
+                        classes="mini-btn",
+                    ),
+                    Button(
+                        "5 Small",
+                        id=f"btn-reassign-small-{t.id}",
+                        variant="success",
+                        classes="mini-btn",
+                    ),
+                    Button(
+                        "P Postpone",
+                        id=f"btn-reassign-postponed-{t.id}",
+                        variant="default",
+                        classes="mini-btn",
+                    ),
+                    classes="task-row",
                 )
                 await plan_container.mount(row)
 

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.07.22.26] - 2026-07-22
+
+### Fixed
+
+- **tui**: Fix CSS content alignment and refine top bar layout so action buttons and task rows render side-by-side cleanly with keyboard shortcut hints (`G` to Generate, `S` to Sync, `Q` to Quit).
+
 ## [v26.07.22.25] - 2026-07-22
 
 ### Added
