@@ -101,9 +101,13 @@ def run_cli(auto: bool = False, json_output: bool = False) -> TriagePlan:
     free_blocks = gcal.get_free_time_blocks(day_start=day_start, day_end=day_end)
 
     if not auto and not json_output:
-        console.print("[dim]Generating 1-3-5 plan with local LLM...[/dim]")
-
-    plan = llm.plan_triage(tasks=tasks, free_blocks=free_blocks)
+        with console.status(
+            "[bold cyan]Generating plan with local LLM...[/bold cyan]",
+            spinner="dots",
+        ):
+            plan = llm.plan_triage(tasks=tasks, free_blocks=free_blocks)
+    else:
+        plan = llm.plan_triage(tasks=tasks, free_blocks=free_blocks)
 
     if json_output:
         print(plan.model_dump_json(indent=2))

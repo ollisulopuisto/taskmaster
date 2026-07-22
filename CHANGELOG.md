@@ -5,12 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
-## [v26.07.22.15] - 2026-07-22
+## [v26.07.22.16] - 2026-07-22
 
-### Fixed
+### Added
 
-- **launchagent**: Restore Gemma reasoning settings intact; keep `-ngl 99` GPU offloading enabled.
-- **llm**: Set `max_tokens=4096` in `LLMService` to accommodate full reasoning output without truncating response.
+- **cli**: Add active Rich status spinner during LLM plan generation.
+- **config**: Set client and frontend timeouts to 300s to support local reasoning model execution.
 
 ## [v26.06.29.4] - 2026-06-29
 
