@@ -136,7 +136,9 @@ class TestTodoistService:
             svc = self._service()
             svc.postpone_task("1", date(2026, 6, 29))
 
-        MockAPI.return_value.update_task.assert_called_once_with(task_id="1", due_date="2026-06-29")
+        MockAPI.return_value.update_task.assert_called_once_with(
+            task_id="1", due_date=date(2026, 6, 29)
+        )
 
     def test_postpone_task_accepts_string_id(self) -> None:
         from datetime import date
@@ -146,7 +148,7 @@ class TestTodoistService:
             svc.postpone_task("abc-123", date(2026, 7, 1))
 
         MockAPI.return_value.update_task.assert_called_once_with(
-            task_id="abc-123", due_date="2026-07-01"
+            task_id="abc-123", due_date=date(2026, 7, 1)
         )
 
     def test_sync_plan_priorities_updates_todoist(self) -> None:
@@ -167,4 +169,4 @@ class TestTodoistService:
             inst.update_task.assert_any_call(task_id="b1", priority=4)
             inst.update_task.assert_any_call(task_id="m1", priority=3)
             inst.update_task.assert_any_call(task_id="s1", priority=2)
-            inst.update_task.assert_any_call(task_id="p1", due_date="2026-06-29")
+            inst.update_task.assert_any_call(task_id="p1", due_date=date(2026, 6, 29))

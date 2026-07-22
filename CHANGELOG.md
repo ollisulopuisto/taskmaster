@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.07.22.28] - 2026-07-22
+
+### Fixed
+
+- **todoist**: Pass `datetime.date` object instead of ISO string to `TodoistAPI.update_task(due_date=...)` in `postpone_task()`, fixing `AttributeError: 'str' object has no attribute 'isoformat'` during sync.
+
 ## [v26.07.22.27] - 2026-07-22
 
 ### Added
