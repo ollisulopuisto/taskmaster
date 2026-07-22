@@ -130,7 +130,7 @@ def main() -> None:
     if args.auto or args.json or args.cli:
         run_cli(auto=args.auto, json_output=args.json)
     else:
-        from src.tui import TaskMasterApp
+        from tui import TaskMasterApp
 
         app = TaskMasterApp()
         app.run()

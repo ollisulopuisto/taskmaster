@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.07.22.21] - 2026-07-22
+
+### Fixed
+
+- **cli**: Fix `from tui import TaskMasterApp` import in `src/cli.py` to prevent `ModuleNotFoundError` when running `uv run src/cli.py`.
+
 ## [v26.07.22.20] - 2026-07-22
 
 ### Changed

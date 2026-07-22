@@ -9,7 +9,7 @@ import pytest
 from textual.widgets import Static, TabbedContent
 
 from models.task import Task, TimeBlock, TriagePlan
-from src.tui import TaskMasterApp
+from tui import TaskMasterApp
 
 
 @pytest.fixture
@@ -29,9 +29,9 @@ def mock_services():
     mock_blocks = [TimeBlock(start="2026-07-22T10:00:00+03:00", end="2026-07-22T12:00:00+03:00")]
 
     with (
-        patch("src.tui.TodoistService") as mock_todoist_cls,
-        patch("src.tui.GCalService") as mock_gcal_cls,
-        patch("src.tui.LLMService") as mock_llm_cls,
+        patch("tui.TodoistService") as mock_todoist_cls,
+        patch("tui.GCalService") as mock_gcal_cls,
+        patch("tui.LLMService") as mock_llm_cls,
     ):
         mock_todoist = MagicMock()
         mock_todoist.get_todays_tasks.return_value = mock_tasks
@@ -45,6 +45,7 @@ def mock_services():
         mock_llm = MagicMock()
         mock_llm.plan_triage.return_value = mock_plan
         mock_llm_cls.return_value = mock_llm
+        mock_llm_cls.from_env.return_value = mock_llm
 
         yield {
             "todoist": mock_todoist,
