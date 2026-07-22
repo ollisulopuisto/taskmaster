@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.07.22.25] - 2026-07-22
+
+### Added
+
+- **tui**: Add interactive task reassignment buttons (`[1 Big]`, `[3 Med]`, `[5 Small]`, `[P Postpone]`) for every task row in `src/tui.py`. Allows instant in-app plan customization with zero LLM API calls.
+
 ## [v26.07.22.24] - 2026-07-22
 
 ### Added

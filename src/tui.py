@@ -138,7 +138,14 @@ class TaskMasterApp(App):
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id
-        if button_id == "btn-generate-plan":
+        if button_id.startswith("btn-reassign-"):
+            parts = button_id.split("-")
+            target = parts[2]
+            task_id = "-".join(parts[3:])
+            if self.morning_plan:
+                self.morning_plan = self.morning_plan.reassign_task(task_id, target)
+                await self.render_plan_table()
+        elif button_id == "btn-generate-plan":
             await self.action_generate_plan()
         elif button_id == "btn-sync-plan":
             await self.action_sync_plan()
@@ -147,11 +154,13 @@ class TaskMasterApp(App):
         elif button_id == "btn-fetch-debug":
             await self.action_fetch_debug()
 
-    def render_plan_table(self) -> None:
-        """Render the 1-3-5 plan and proposed postponed tasks table."""
-        plan_text = self.query_one("#plan-text", Static)
+    async def render_plan_table(self) -> None:
+        """Render the 1-3-5 plan and proposed postponed tasks with interactive reassign buttons."""
+        plan_container = self.query_one("#plan-container", VerticalScroll)
+        await plan_container.remove_children()
+
         if not self.morning_plan:
-            plan_text.update("No plan generated yet.")
+            await plan_container.mount(Static("No plan generated yet.", id="plan-text"))
             return
 
         plan = self.morning_plan
@@ -175,7 +184,25 @@ class TaskMasterApp(App):
                 "[dim magenta]POSTPONED[/dim magenta]", f"[dim]{t.content}[/dim]{stale_badge}"
             )
 
-        plan_text.update(plan_table)
+        await plan_container.mount(Static(plan_table, id="plan-text"))
+
+        # Mount interactive reassign buttons for each task
+        all_items = [
+            ("BIG", plan.big),
+            ("MEDIUM", plan.medium),
+            ("SMALL", plan.small),
+            ("POSTPONED", plan.postponed),
+        ]
+        for cat_name, task_list in all_items:
+            for t in task_list:
+                row = Horizontal(
+                    Static(f"[{cat_name}] [bold]{t.content}[/bold]", classes="task-label"),
+                    Button("1 Big", id=f"btn-reassign-big-{t.id}", variant="error"),
+                    Button("3 Med", id=f"btn-reassign-medium-{t.id}", variant="warning"),
+                    Button("5 Small", id=f"btn-reassign-small-{t.id}", variant="success"),
+                    Button("P Postpone", id=f"btn-reassign-postponed-{t.id}", variant="default"),
+                )
+                await plan_container.mount(row)
 
     async def action_sync_plan(self) -> None:
         plan_text = self.query_one("#plan-text", Static)
@@ -235,7 +262,7 @@ class TaskMasterApp(App):
         # Call LLM
         plan = llm.plan_triage(tasks=tasks, free_blocks=free_blocks)
         self.morning_plan = plan
-        self.render_plan_table()
+        await self.render_plan_table()
 
         # Populate Evening debrief container
         self.all_tasks = plan.big + plan.medium + plan.small

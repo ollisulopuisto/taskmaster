@@ -6,7 +6,7 @@ from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pytest
-from textual.widgets import Static, TabbedContent
+from textual.widgets import Button, Static, TabbedContent
 
 from models.task import Task, TimeBlock, TriagePlan
 from tui import TaskMasterApp
@@ -99,3 +99,19 @@ async def test_tui_debug_tab_fetch(mock_services):
 
         debug_widget = app.query_one("#debug-container")
         assert debug_widget is not None
+
+
+@pytest.mark.anyio
+async def test_tui_interactive_reassign_task(mock_services):
+    """Clicking [1 Big] reassign button on task t2 promotes it to BIG."""
+    app = TaskMasterApp()
+    async with app.run_test() as pilot:
+        await pilot.click("#btn-generate-plan")
+        await pilot.pause()
+
+        # Press promote button for t2
+        btn = app.query_one("#btn-reassign-big-t2", Button)
+        btn.press()
+        await pilot.pause()
+
+        assert app.morning_plan.big[0].id == "t2"
