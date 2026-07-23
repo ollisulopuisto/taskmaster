@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import time
 from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -22,6 +23,7 @@ from models.task import TriagePlan
 from services.gcal_service import GCalService
 from services.llm_service import LLMService
 from services.todoist_service import TodoistService
+from tui import format_duration
 
 load_dotenv(override=False)
 console = Console()
@@ -42,7 +44,10 @@ def get_services(backend_key: str | None = None) -> tuple[TodoistService, GCalSe
 
 
 def render_triage_plan(
-    plan: TriagePlan, schedule_events: list[dict[str, Any]], free_blocks: list[Any]
+    plan: TriagePlan,
+    schedule_events: list[dict[str, Any]],
+    free_blocks: list[Any],
+    elapsed_sec: float | None = None,
 ) -> None:
     """Render a beautiful Rich TUI panel showing schedule and 1-3-5 plan."""
     console.clear()
@@ -68,8 +73,11 @@ def render_triage_plan(
             sched_table.add_row(f"{start_str} → {end_str}", "[green]Free time block[/green]")
 
     # 1-3-5 Plan table
-    plan_table = Table(title=f"🎯 1-3-5 Daily Plan ({plan.quadrant} / {plan.domain})", expand=True)
-    plan_table.add_column("Category", style="bold cyan", width=12)
+    dur_str = f" · ⏱️ {format_duration(elapsed_sec)}" if elapsed_sec is not None else ""
+    plan_table = Table(
+        title=f"🎯 1-3-5 Daily Plan ({plan.quadrant} / {plan.domain}){dur_str}", expand=True
+    )
+    plan_table.add_column("Category", style="bold cyan", width=14)
     plan_table.add_column("Task Content", style="white")
 
     for task in plan.big:
@@ -78,6 +86,13 @@ def render_triage_plan(
         plan_table.add_row("[yellow]MEDIUM (3)[/yellow]", task.content)
     for task in plan.small:
         plan_table.add_row("[green]SMALL (5)[/green]", task.content)
+    for task in plan.postponed:
+        stale_badge = (
+            f" [bold yellow][STALE {task.days_overdue}d][/bold yellow]" if task.is_stale else ""
+        )
+        plan_table.add_row(
+            "[dim magenta]POSTPONED[/dim magenta]", f"[dim]{task.content}[/dim]{stale_badge}"
+        )
 
     console.print(Columns([Panel(sched_table), Panel(plan_table)]))
 
@@ -90,6 +105,7 @@ def run_cli(
     backend: str | None = None,
 ) -> TriagePlan:
     """Run the triage process in interactive or autonomous mode."""
+    start_time = time.perf_counter()
     if not auto and not json_output:
         console.print("[dim]Fetching tasks from Todoist and events from Google Calendar...[/dim]")
 
@@ -112,10 +128,12 @@ def run_cli(
     else:
         plan = llm.plan_triage(tasks=tasks, free_blocks=free_blocks)
 
+    elapsed_sec = time.perf_counter() - start_time
+
     if json_output:
         print(plan.model_dump_json(indent=2))
     else:
-        render_triage_plan(plan, events, free_blocks)
+        render_triage_plan(plan, events, free_blocks, elapsed_sec=elapsed_sec)
         if dry_run:
             console.print(
                 "[yellow]ℹ DRY RUN / Read-Only Mode: "

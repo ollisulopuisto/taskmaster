@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.07.23.41] - 2026-07-23
+
+### Fixed
+
+- **cli**: Render postponed tasks (including `[STALE]` badges) and execution duration badge in `render_triage_plan()` for CLI and `--dry-run` output.
+
 ## [v26.07.23.40] - 2026-07-23
 
 ### Added

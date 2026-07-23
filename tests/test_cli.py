@@ -111,3 +111,18 @@ def test_cli_sync_flag():
 
         assert plan == mock_plan
         mock_todoist.sync_plan_priorities.assert_called_once()
+
+
+def test_render_triage_plan_includes_postponed_tasks(capsys):
+    """Verify render_triage_plan displays POSTPONED tasks and stale badges."""
+    from cli import render_triage_plan
+
+    postponed_task = Task(
+        id="p1", content="Postponed task", project_id="proj", due_date=date.today(), days_overdue=8
+    )
+    plan = TriagePlan(big=[], medium=[], small=[], postponed=[postponed_task])
+    render_triage_plan(plan, schedule_events=[], free_blocks=[])
+    captured = capsys.readouterr()
+    assert "POSTPONED" in captured.out
+    assert "Postponed task" in captured.out
+    assert "STALE" in captured.out
