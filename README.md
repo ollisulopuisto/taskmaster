@@ -84,15 +84,33 @@ uv run python src/cli.py
 - `S` : Confirm & sync plan priorities to Todoist
 - `Q` : Quit application
 
-### 2. Autonomous CLI (for Cron / LaunchAgent)
+### 2. Autonomous CLI & Batch Modes (Cron / LaunchAgent)
+
+TaskMaster includes full command-line batching support with read-only `--dry-run` protection:
 
 ```bash
-# Run silently and output summary
-uv run python src/cli.py --auto
+# Safe Dry-Run: generate plan and render in terminal without modifying Todoist
+uv run python src/cli.py --cli --dry-run
 
-# Output raw JSON plan
+# Dry-run with specific LLM backend (e.g. Gemini)
+uv run python src/cli.py --cli --dry-run --backend gemini
+
+# Autonomous morning run with automated Todoist priority sync
+uv run python src/cli.py --auto --sync
+
+# Output raw structured JSON plan for scripting
 uv run python src/cli.py --json
 ```
+
+#### Available CLI Options:
+| Flag | Description |
+|---|---|
+| `--dry-run` | Run triage and display plan without making any remote changes or syncing to Todoist |
+| `--sync` | Automatically sync proposed 1-3-5 plan priorities back to Todoist after generation |
+| `--backend <key>` | Select specific LLM backend defined in `.env` (e.g., `local`, `gemini`) |
+| `--auto` | Non-interactive execution mode (for `cron` or macOS `LaunchAgent`) |
+| `--cli` | Quick non-interactive Rich terminal panel render |
+| `--json` | Output raw structured JSON string |
 
 ### 3. Streamlit Web UI (Optional)
 

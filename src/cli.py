@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import argparse
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -27,7 +27,7 @@ load_dotenv(override=False)
 console = Console()
 
 
-def get_services() -> tuple[TodoistService, GCalService, LLMService]:
+def get_services(backend_key: str | None = None) -> tuple[TodoistService, GCalService, LLMService]:
     """Instantiate services using environment variables."""
     calendar_ids = [
         cid.strip() for cid in os.getenv("GOOGLE_CALENDAR_IDS", "primary").split(",") if cid.strip()
@@ -37,7 +37,7 @@ def get_services() -> tuple[TodoistService, GCalService, LLMService]:
         calendar_ids=calendar_ids,
         credentials_path=os.getenv("GOOGLE_CREDENTIALS_PATH", "credentials.json"),
     )
-    llm = LLMService.from_env()
+    llm = LLMService.from_env(backend_key=backend_key)
     return todoist, gcal, llm
 
 
@@ -82,12 +82,18 @@ def render_triage_plan(
     console.print(Columns([Panel(sched_table), Panel(plan_table)]))
 
 
-def run_cli(auto: bool = False, json_output: bool = False) -> TriagePlan:
+def run_cli(
+    auto: bool = False,
+    json_output: bool = False,
+    dry_run: bool = False,
+    sync: bool = False,
+    backend: str | None = None,
+) -> TriagePlan:
     """Run the triage process in interactive or autonomous mode."""
     if not auto and not json_output:
         console.print("[dim]Fetching tasks from Todoist and events from Google Calendar...[/dim]")
 
-    todoist, gcal, llm = get_services()
+    todoist, gcal, llm = get_services(backend_key=backend)
 
     tasks = todoist.get_todays_tasks()
     events = gcal.get_todays_events()
@@ -99,7 +105,7 @@ def run_cli(auto: bool = False, json_output: bool = False) -> TriagePlan:
 
     if not auto and not json_output:
         with console.status(
-            "[bold cyan]Generating plan with local LLM...[/bold cyan]",
+            "[bold cyan]Generating plan with LLM...[/bold cyan]",
             spinner="dots",
         ):
             plan = llm.plan_triage(tasks=tasks, free_blocks=free_blocks)
@@ -110,6 +116,16 @@ def run_cli(auto: bool = False, json_output: bool = False) -> TriagePlan:
         print(plan.model_dump_json(indent=2))
     else:
         render_triage_plan(plan, events, free_blocks)
+        if dry_run:
+            console.print(
+                "[yellow]ℹ DRY RUN / Read-Only Mode: "
+                "Plan generated, no changes synced to Todoist.[/yellow]"
+            )
+        elif sync:
+            tomorrow = datetime.now().date() + timedelta(days=1)
+            todoist.sync_plan_priorities(plan, tomorrow=tomorrow)
+            console.print("[green]✔ Plan priorities synced to Todoist.[/green]")
+
         if auto:
             console.print("[green]✔ Autonomous morning triage completed successfully.[/green]")
 
@@ -119,16 +135,40 @@ def run_cli(auto: bool = False, json_output: bool = False) -> TriagePlan:
 def main() -> None:
     parser = argparse.ArgumentParser(description="TaskMaster TUI & Autonomous CLI")
     parser.add_argument(
-        "--auto", action="store_true", help="Run autonomously without user input (for cron/launchd)"
+        "--auto",
+        action="store_true",
+        help="Run autonomously without user input (for cron/launchd)",
     )
     parser.add_argument("--json", action="store_true", help="Output raw JSON plan")
     parser.add_argument(
         "--cli", action="store_true", help="Run quick non-interactive Rich panel render"
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run triage without making any remote changes or syncing to Todoist",
+    )
+    parser.add_argument(
+        "--sync",
+        action="store_true",
+        help="Automatically sync proposed 1-3-5 plan priorities back to Todoist",
+    )
+    parser.add_argument(
+        "--backend",
+        type=str,
+        default=None,
+        help="LLM backend key defined in .env (e.g. 'local', 'gemini')",
+    )
     args = parser.parse_args()
 
-    if args.auto or args.json or args.cli:
-        run_cli(auto=args.auto, json_output=args.json)
+    if args.auto or args.json or args.cli or args.dry_run:
+        run_cli(
+            auto=args.auto,
+            json_output=args.json,
+            dry_run=args.dry_run,
+            sync=args.sync,
+            backend=args.backend,
+        )
     else:
         from tui import TaskMasterApp
 

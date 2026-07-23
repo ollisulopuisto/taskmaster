@@ -1,6 +1,6 @@
 [project]
 name = "taskmaster"
-version = "26.07.23.39"
+version = "26.07.23.40"
 description = "Add your description here"
 readme = "README.md"
 authors = [

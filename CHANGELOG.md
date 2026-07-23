@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.07.23.40] - 2026-07-23
+
+### Added
+
+- **cli**: Add `--dry-run`, `--sync`, and `--backend <key>` command-line flags to `src/cli.py` for safe batch runs, read-only testing, and automated cron/LaunchAgent triage.
+
 ## [v26.07.23.39] - 2026-07-23
 
 ### Documentation
