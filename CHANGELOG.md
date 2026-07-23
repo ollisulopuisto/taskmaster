@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.07.23.33] - 2026-07-23
+
+### Performance
+
+- **llm**: Optimize LLM triage output schema (`TriagePlanIDs`) to return only task ID lists per category instead of entire duplicated `Task` objects. Reduces output tokens by ~40x (from ~2000 to ~50 tokens), preventing local LLM timeouts/formatting bottlenecks while speeding up responses for both local models and cloud APIs (Gemini/OpenAI).
+
 ## [v26.07.23.32] - 2026-07-23
 
 ### Fixed

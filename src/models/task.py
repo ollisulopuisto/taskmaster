@@ -37,6 +37,17 @@ class TimeBlock(BaseModel):
     end: str  # ISO-8601 duration (e.g. "PT1H") or end datetime
 
 
+class TriagePlanIDs(BaseModel):
+    """Lightweight structured LLM output containing task IDs per category."""
+
+    big: list[str] = []
+    medium: list[str] = []
+    small: list[str] = []
+    postponed: list[str] = []
+    quadrant: Quadrant = "not_urgent_important"
+    domain: Domain = "civilian"
+
+
 class TriagePlan(BaseModel):
     """Structured LLM output and interactive user plan."""
 

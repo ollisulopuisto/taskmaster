@@ -3,7 +3,7 @@
 from datetime import date
 from unittest.mock import MagicMock
 
-from models.task import Task, TimeBlock, TriagePlan
+from models.task import Task, TimeBlock, TriagePlanIDs
 from services.llm_service import LLMService
 
 
@@ -23,7 +23,7 @@ def test_plan_triage_uses_cache_on_identical_input(tmp_path):
     t1 = Task(id="1", content="Task A", project_id="p1", due_date=date(2026, 7, 22))
     b1 = TimeBlock(start="2026-07-22T09:00:00", end="2026-07-22T10:00:00")
 
-    mock_plan = TriagePlan(big=[t1])
+    mock_plan = TriagePlanIDs(big=["1"])
 
     service = LLMService(model="test", base_url="http://fake", cache_dir=str(tmp_path))
     service._client = MagicMock()
@@ -42,7 +42,7 @@ def test_plan_triage_uses_cache_on_identical_input(tmp_path):
 
 def test_plan_triage_force_refresh_bypasses_cache(tmp_path):
     t1 = Task(id="1", content="Task A", project_id="p1", due_date=date(2026, 7, 22))
-    mock_plan = TriagePlan(big=[t1])
+    mock_plan = TriagePlanIDs(big=["1"])
 
     service = LLMService(model="test", base_url="http://fake", cache_dir=str(tmp_path))
     service._client = MagicMock()

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from models.task import Task, TriagePlan
+from models.task import Task, TriagePlan, TriagePlanIDs
 from services.llm_service import LLMService
 
 
@@ -31,9 +31,9 @@ class TestLLMService:
 
     def test_plan_triage_returns_parsed_pydantic_model(self) -> None:
         tasks = [_task(id="1", content="Write report"), _task(id="2", content="Email team")]
-        expected = TriagePlan(
-            big=[tasks[0]],
-            medium=[tasks[1]],
+        raw_response = TriagePlanIDs(
+            big=["1"],
+            medium=["2"],
             small=[],
             quadrant="urgent_important",
             domain="work",
@@ -41,7 +41,7 @@ class TestLLMService:
 
         fake_instructor = self._fake_instructor()
         fake_client = MagicMock()
-        fake_client.chat.completions.create.return_value = expected
+        fake_client.chat.completions.create.return_value = raw_response
         fake_instructor.from_openai.return_value = fake_client
 
         with self._patch_instructor(fake_instructor):
@@ -56,7 +56,7 @@ class TestLLMService:
         tasks = [_task(id="1", content="Write report")]
         fake_instructor = self._fake_instructor()
         fake_client = fake_instructor.from_openai.return_value
-        fake_client.chat.completions.create.return_value = TriagePlan()
+        fake_client.chat.completions.create.return_value = TriagePlanIDs()
 
         with self._patch_instructor(fake_instructor):
             self._service().plan_triage(tasks=tasks, free_blocks=[])
@@ -74,7 +74,7 @@ class TestLLMService:
 
         fake_instructor = self._fake_instructor()
         fake_client = fake_instructor.from_openai.return_value
-        fake_client.chat.completions.create.return_value = TriagePlan()
+        fake_client.chat.completions.create.return_value = TriagePlanIDs()
 
         with self._patch_instructor(fake_instructor):
             self._service().plan_triage(tasks=tasks, free_blocks=blocks)
@@ -85,23 +85,23 @@ class TestLLMService:
         assert "09:00" in prompt_text
 
     def test_plan_triage_uses_response_format_model(self) -> None:
-        """Verify the LLM is asked to return structured JSON matching TriagePlan."""
+        """Verify the LLM is asked to return structured JSON matching TriagePlanIDs."""
         fake_instructor = self._fake_instructor()
         fake_client = fake_instructor.from_openai.return_value
-        fake_client.chat.completions.create.return_value = TriagePlan()
+        fake_client.chat.completions.create.return_value = TriagePlanIDs()
 
         with self._patch_instructor(fake_instructor):
             self._service().plan_triage(tasks=[], free_blocks=[])
 
         call_kwargs = fake_client.chat.completions.create.call_args.kwargs
         # instructor passes the pydantic model as response_model
-        assert call_kwargs.get("response_model") is TriagePlan
-        assert call_kwargs.get("max_tokens") == 4096
+        assert call_kwargs.get("response_model") is TriagePlanIDs
+        assert call_kwargs.get("max_tokens") == 1024
 
     def test_plan_triage_handles_empty_task_list(self) -> None:
         fake_instructor = self._fake_instructor()
         fake_client = MagicMock()
-        fake_client.chat.completions.create.return_value = TriagePlan()
+        fake_client.chat.completions.create.return_value = TriagePlanIDs()
         fake_instructor.from_openai.return_value = fake_client
 
         with self._patch_instructor(fake_instructor):
@@ -116,7 +116,7 @@ class TestLLMService:
         """Verify the system prompt instructs the LLM to return only JSON."""
         fake_instructor = self._fake_instructor()
         fake_client = fake_instructor.from_openai.return_value
-        fake_client.chat.completions.create.return_value = TriagePlan()
+        fake_client.chat.completions.create.return_value = TriagePlanIDs()
 
         with self._patch_instructor(fake_instructor):
             self._service().plan_triage(tasks=[], free_blocks=[])
@@ -135,6 +135,26 @@ class TestLLMService:
         with self._patch_instructor(fake_instructor):
             with pytest.raises(ValueError, match="invalid JSON"):
                 self._service().plan_triage(tasks=[], free_blocks=[])
+
+    def test_plan_triage_hydrates_task_ids_and_postpones_unassigned_tasks(self) -> None:
+        """Verify tasks not assigned by LLM are auto-appended to postponed list."""
+        t1 = _task(id="t1", content="Task 1")
+        t2 = _task(id="t2", content="Task 2")
+        t3 = _task(id="t3", content="Task 3")
+        tasks = [t1, t2, t3]
+
+        raw_response = TriagePlanIDs(big=["t1"], medium=[], small=[], postponed=[])
+
+        fake_instructor = self._fake_instructor()
+        fake_client = MagicMock()
+        fake_client.chat.completions.create.return_value = raw_response
+        fake_instructor.from_openai.return_value = fake_client
+
+        with self._patch_instructor(fake_instructor):
+            result = self._service().plan_triage(tasks=tasks, free_blocks=[])
+
+        assert [t.id for t in result.big] == ["t1"]
+        assert [t.id for t in result.postponed] == ["t2", "t3"]
 
     def test_constructor_configures_instructor_json_mode(self) -> None:
         """LLMService should use instructor.Mode.MD_JSON for llama.cpp compatibility."""

@@ -23,7 +23,7 @@ import httpx
 import instructor
 from openai import OpenAI
 
-from models.task import Task, TriagePlan
+from models.task import Task, TriagePlan, TriagePlanIDs
 
 
 class LLMService:
@@ -101,7 +101,7 @@ class LLMService:
                 pass  # Fallback to fresh LLM call if cache reading fails
 
         prompt = self._build_prompt(tasks, free_blocks)
-        response = self._client.chat.completions.create(
+        raw_plan: TriagePlanIDs = self._client.chat.completions.create(
             model=self._model,
             messages=[
                 {
@@ -112,22 +112,51 @@ class LLMService:
                         "2. Yli 7pv myöhästyneet 'STALE'-tehtävät menevät 'postponed'-listalle.\n"
                         "3. Kesto <= 15m tehtävät ovat 'small'.\n"
                         "Valitse 1 Big, 3 Medium, 5 Small -tehtävää.\n"
-                        "Palauta JSON ('big', 'medium', 'small', 'postponed')."
+                        "Palauta ainoastaan JSON tehtävien ID-luettelona "
+                        "('big', 'medium', 'small', 'postponed')."
                     ),
                 },
                 {"role": "user", "content": prompt},
             ],
-            response_model=TriagePlan,
-            max_tokens=4096,
+            response_model=TriagePlanIDs,
+            max_tokens=1024,
+        )
+
+        def _get_id(item: Any) -> str:
+            return item.id if hasattr(item, "id") else str(item)
+
+        task_map = {t.id: t for t in tasks}
+        big_ids = [_get_id(x) for x in raw_plan.big]
+        medium_ids = [_get_id(x) for x in raw_plan.medium]
+        small_ids = [_get_id(x) for x in raw_plan.small]
+        postponed_ids = [_get_id(x) for x in raw_plan.postponed]
+
+        big_tasks = [task_map[tid] for tid in big_ids if tid in task_map]
+        medium_tasks = [task_map[tid] for tid in medium_ids if tid in task_map]
+        small_tasks = [task_map[tid] for tid in small_ids if tid in task_map]
+        postponed_tasks = [task_map[tid] for tid in postponed_ids if tid in task_map]
+
+        assigned_ids = set(big_ids + medium_ids + small_ids + postponed_ids)
+        for t in tasks:
+            if t.id not in assigned_ids:
+                postponed_tasks.append(t)
+
+        hydrated_plan = TriagePlan(
+            big=big_tasks,
+            medium=medium_tasks,
+            small=small_tasks,
+            postponed=postponed_tasks,
+            quadrant=raw_plan.quadrant,
+            domain=raw_plan.domain,
         )
 
         if cache_file:
             try:
-                cache_file.write_text(response.model_dump_json(), encoding="utf-8")
+                cache_file.write_text(hydrated_plan.model_dump_json(), encoding="utf-8")
             except Exception:
                 pass
 
-        return response
+        return hydrated_plan
 
     @staticmethod
     def _format_task(t: Task) -> str:

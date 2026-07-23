@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 from openai import OpenAI
 
-from models.task import Task, TriagePlan
+from models.task import Task, TriagePlan, TriagePlanIDs
 from services.llm_service import LLMService
 
 # ---------------------------------------------------------------------------
@@ -46,10 +46,10 @@ class TestOllamaIntegration:
     """Verify the full OpenAI → instructor → TriagePlan parsing chain."""
 
     def test_full_chain_parses_valid_json_into_triage_plan(self) -> None:
-        """Simulate Ollama returning valid JSON — instructor parses into TriagePlan."""
+        """Simulate Ollama returning valid JSON — instructor parses into TriagePlanIDs."""
         service = LLMService(model="llama3", base_url="http://ollama:11434/v1")
 
-        fake_response = TriagePlan(quadrant="urgent_important", domain="work")
+        fake_response = TriagePlanIDs(quadrant="urgent_important", domain="work")
 
         with patch.object(
             service._client.chat.completions,
@@ -61,7 +61,7 @@ class TestOllamaIntegration:
             # Verify the LLM was asked for a structured response
             call_kwargs = mock_create.call_args.kwargs
             assert "response_model" in call_kwargs
-            assert call_kwargs["response_model"] is TriagePlan
+            assert call_kwargs["response_model"] is TriagePlanIDs
 
         assert isinstance(result, TriagePlan)
         assert result.quadrant == "urgent_important"
@@ -75,7 +75,7 @@ class TestOllamaIntegration:
 
         def spy_create(**kwargs: Any) -> Any:
             captured.update(kwargs)
-            return TriagePlan()
+            return TriagePlanIDs()
 
         service._client.chat.completions.create = spy_create
 
