@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.07.23.35] - 2026-07-23
+
+### Fixed
+
+- **llm**: Increase default `max_tokens` from 4096 to 8192 and instruct system prompt to omit verbose chain-of-thought reasoning, preventing `IncompleteOutputException` when using local reasoning models (such as Gemma/DeepSeek).
+- **tui**: Wrap plan generation in a `try...except` block to cleanly display LLM errors on screen without crashing the Textual UI.
+
 ## [v26.07.23.34] - 2026-07-23
 
 ### Added

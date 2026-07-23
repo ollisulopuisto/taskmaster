@@ -346,16 +346,19 @@ class TaskMasterApp(App):
         sched_text.update(sched_table)
 
         # Call LLM
-        plan = await asyncio.to_thread(llm.plan_triage, tasks=tasks, free_blocks=free_blocks)
-        self.morning_plan = plan
-        await self.render_plan_table()
+        try:
+            plan = await asyncio.to_thread(llm.plan_triage, tasks=tasks, free_blocks=free_blocks)
+            self.morning_plan = plan
+            await self.render_plan_table()
 
-        # Populate Evening debrief container
-        self.all_tasks = plan.big + plan.medium + plan.small
-        evening_text = self.query_one("#evening-text", Static)
-        evening_text.update(
-            f"[bold green]Populated {len(self.all_tasks)} tasks for debrief.[/bold green]"
-        )
+            # Populate Evening debrief container
+            self.all_tasks = plan.big + plan.medium + plan.small
+            evening_text = self.query_one("#evening-text", Static)
+            evening_text.update(
+                f"[bold green]Populated {len(self.all_tasks)} tasks for debrief.[/bold green]"
+            )
+        except Exception as exc:
+            plan_text.update(f"[bold red]❌ LLM Error: {exc}[/bold red]")
 
     async def action_submit_debrief(self) -> None:
         evening_text = self.query_one("#evening-text", Static)

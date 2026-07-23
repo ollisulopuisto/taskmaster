@@ -36,6 +36,7 @@ class LLMService:
         api_key: str = "ollama",
         timeout: float = 600.0,
         cache_dir: str = "",
+        max_tokens: int = 8192,
     ) -> None:
         raw_client = OpenAI(
             base_url=base_url,
@@ -44,6 +45,7 @@ class LLMService:
         )
         self._client = instructor.from_openai(raw_client, mode=instructor.Mode.MD_JSON)
         self._model = model
+        self._max_tokens = max_tokens
         self._cache_dir = Path(cache_dir) if cache_dir else None
         if self._cache_dir:
             self._cache_dir.mkdir(parents=True, exist_ok=True)
@@ -165,6 +167,8 @@ class LLMService:
                         "2. Yli 7pv myöhästyneet 'STALE'-tehtävät menevät 'postponed'-listalle.\n"
                         "3. Kesto <= 15m tehtävät ovat 'small'.\n"
                         "Valitse 1 Big, 3 Medium, 5 Small -tehtävää.\n"
+                        "TÄRKEÄÄ: Ole tiivis. Älä generoi pitkää päättelyketjua "
+                        "(no long CoT reasoning).\n"
                         "Palauta ainoastaan JSON tehtävien ID-luettelona "
                         "('big', 'medium', 'small', 'postponed')."
                     ),
@@ -172,7 +176,7 @@ class LLMService:
                 {"role": "user", "content": prompt},
             ],
             response_model=TriagePlanIDs,
-            max_tokens=4096,
+            max_tokens=self._max_tokens,
         )
 
         def _get_id(item: Any) -> str:

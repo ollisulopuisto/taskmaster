@@ -96,7 +96,7 @@ class TestLLMService:
         call_kwargs = fake_client.chat.completions.create.call_args.kwargs
         # instructor passes the pydantic model as response_model
         assert call_kwargs.get("response_model") is TriagePlanIDs
-        assert call_kwargs.get("max_tokens") == 4096
+        assert call_kwargs.get("max_tokens") == 8192
 
     def test_plan_triage_handles_empty_task_list(self) -> None:
         fake_instructor = self._fake_instructor()
