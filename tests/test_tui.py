@@ -162,3 +162,17 @@ async def test_tui_backend_selector_renders_options(mock_services):
         select_widget = app.query_one("#select-llm-backend", Select)
         assert select_widget is not None
         assert select_widget.value is not None
+
+
+@pytest.mark.anyio
+async def test_tui_displays_execution_duration(mock_services):
+    """Verify plan generation records and displays execution duration in seconds."""
+    app = TaskMasterApp()
+    async with app.run_test() as pilot:
+        await pilot.click("#btn-generate-plan")
+        await pilot.pause()
+
+        assert app.last_elapsed_sec is not None
+        assert app.last_elapsed_sec >= 0
+        plan_text = app.query_one("#plan-text", Static)
+        assert "⏱️" in str(plan_text.content.title)

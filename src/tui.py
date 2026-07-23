@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -110,6 +111,8 @@ class TaskMasterApp(App):
         self.schedule_events: list[dict[str, Any]] = []
         self.free_blocks: list[Any] = []
         self.all_tasks: list[Any] = []
+        self.last_elapsed_sec: float | None = None
+        self.last_selected_backend: str | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -218,8 +221,9 @@ class TaskMasterApp(App):
             return
 
         plan = self.morning_plan
+        dur_str = f" · ⏱️ {self.last_elapsed_sec:.2f}s" if self.last_elapsed_sec is not None else ""
         plan_table = Table(
-            title=f"🎯 1-3-5 Daily Plan ({plan.quadrant} / {plan.domain})", expand=True
+            title=f"🎯 1-3-5 Daily Plan ({plan.quadrant} / {plan.domain}){dur_str}", expand=True
         )
         plan_table.add_column("Category", style="bold cyan", width=16)
         plan_table.add_column("Task Content", style="white")
@@ -297,11 +301,13 @@ class TaskMasterApp(App):
         plan_text.update("[bold green]✔ Plan synced to Todoist![/bold green]")
 
     async def action_generate_plan(self) -> None:
+        start_time = time.perf_counter()
         sched_text = self.query_one("#schedule-text", Static)
         plan_text = self.query_one("#plan-text", Static)
 
         backend_select = self.query_one("#select-llm-backend", Select)
         selected_backend = str(backend_select.value) if backend_select.value else None
+        self.last_selected_backend = selected_backend
 
         sched_text.update("[dim]Fetching Todoist & Google Calendar data...[/dim]")
         plan_text.update(
@@ -348,6 +354,7 @@ class TaskMasterApp(App):
         # Call LLM
         try:
             plan = await asyncio.to_thread(llm.plan_triage, tasks=tasks, free_blocks=free_blocks)
+            self.last_elapsed_sec = time.perf_counter() - start_time
             self.morning_plan = plan
             await self.render_plan_table()
 
@@ -355,7 +362,8 @@ class TaskMasterApp(App):
             self.all_tasks = plan.big + plan.medium + plan.small
             evening_text = self.query_one("#evening-text", Static)
             evening_text.update(
-                f"[bold green]Populated {len(self.all_tasks)} tasks for debrief.[/bold green]"
+                f"[bold green]Populated {len(self.all_tasks)} tasks for debrief "
+                f"(generated in {self.last_elapsed_sec:.2f}s).[/bold green]"
             )
         except Exception as exc:
             plan_text.update(f"[bold red]❌ LLM Error: {exc}[/bold red]")

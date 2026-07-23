@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.07.23.36] - 2026-07-23
+
+### Added
+
+- **tui**: Track and display plan generation execution duration (e.g. `⏱️ 3.42s`) in the TUI daily plan header and evening debrief summary.
+
 ## [v26.07.23.35] - 2026-07-23
 
 ### Fixed
