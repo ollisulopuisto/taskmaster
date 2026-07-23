@@ -35,6 +35,20 @@ from services.todoist_service import TodoistService
 load_dotenv(override=False)
 
 
+def format_duration(seconds: float) -> str:
+    """Format duration in seconds into a human-readable string (e.g. '14.2s' or '2m 15s')."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes = int(seconds // 60)
+    remaining_sec = round(seconds % 60)
+    if remaining_sec == 60:
+        minutes += 1
+        remaining_sec = 0
+    if remaining_sec == 0:
+        return f"{minutes}m"
+    return f"{minutes}m {remaining_sec}s"
+
+
 def get_services(backend_key: str | None = None) -> tuple[TodoistService, GCalService, LLMService]:
     """Instantiate services using environment variables."""
     calendar_ids = [
@@ -221,7 +235,11 @@ class TaskMasterApp(App):
             return
 
         plan = self.morning_plan
-        dur_str = f" · ⏱️ {self.last_elapsed_sec:.2f}s" if self.last_elapsed_sec is not None else ""
+        dur_str = (
+            f" · ⏱️ {format_duration(self.last_elapsed_sec)}"
+            if self.last_elapsed_sec is not None
+            else ""
+        )
         plan_table = Table(
             title=f"🎯 1-3-5 Daily Plan ({plan.quadrant} / {plan.domain}){dur_str}", expand=True
         )
@@ -363,7 +381,7 @@ class TaskMasterApp(App):
             evening_text = self.query_one("#evening-text", Static)
             evening_text.update(
                 f"[bold green]Populated {len(self.all_tasks)} tasks for debrief "
-                f"(generated in {self.last_elapsed_sec:.2f}s).[/bold green]"
+                f"(generated in {format_duration(self.last_elapsed_sec)}).[/bold green]"
             )
         except Exception as exc:
             plan_text.update(f"[bold red]❌ LLM Error: {exc}[/bold red]")

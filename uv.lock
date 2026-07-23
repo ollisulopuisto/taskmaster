@@ -2112,7 +2112,7 @@ wheels = [
 
 [[package]]
 name = "taskmaster"
-version = "26.7.23.36"
+version = "26.7.23.37"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },

@@ -176,3 +176,13 @@ async def test_tui_displays_execution_duration(mock_services):
         assert app.last_elapsed_sec >= 0
         plan_text = app.query_one("#plan-text", Static)
         assert "⏱️" in str(plan_text.content.title)
+
+
+def test_format_duration():
+    from tui import format_duration
+
+    assert format_duration(4.2) == "4.2s"
+    assert format_duration(45.8) == "45.8s"
+    assert format_duration(65.2) == "1m 5s"
+    assert format_duration(120.0) == "2m"
+    assert format_duration(125.7) == "2m 6s"

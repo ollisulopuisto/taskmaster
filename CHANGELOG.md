@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.07.23.37] - 2026-07-23
+
+### Changed
+
+- **tui**: Format plan generation duration into human-readable minutes and seconds (e.g. `45.8s` or `2m 15s`) using `format_duration()` helper.
+
 ## [v26.07.23.36] - 2026-07-23
 
 ### Added
