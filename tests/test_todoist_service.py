@@ -16,13 +16,16 @@ def _make_todoist_task(
     project_id: str = "proj-1",
     due_date: str | None = "2026-06-28",
     is_completed: bool = False,
+    is_recurring: bool = False,
 ) -> MagicMock:
     """Build a fake todoist_api_python Task with the attributes we read."""
     from todoist_api_python.models import Due, Task
 
     due = None
     if due_date is not None:
-        due = Due(date=due_date, string=due_date, lang="en", is_recurring=False, timezone=None)
+        due = Due(
+            date=due_date, string=due_date, lang="en", is_recurring=is_recurring, timezone=None
+        )
 
     return Task(
         id=id,
@@ -116,6 +119,22 @@ class TestTodoistService:
 
         # Tasks without a due date are not "today or overdue" — excluded.
         assert result == []
+
+    def test_get_todays_tasks_excludes_recurring_tasks(self) -> None:
+        recurring = _make_todoist_task(
+            id="1", content="Daily Standup", due_date="2026-06-28", is_recurring=True
+        )
+        one_off = _make_todoist_task(
+            id="2", content="One-off Task", due_date="2026-06-28", is_recurring=False
+        )
+
+        with patch("services.todoist_service.TodoistAPI") as MockAPI:
+            instance = MockAPI.return_value
+            instance.get_tasks.return_value = iter([[recurring, one_off]])
+
+            result = self._service().get_todays_tasks()
+
+        assert [t.id for t in result] == ["2"]
 
     def test_get_todays_tasks_paginates(self) -> None:
         page1 = [_make_todoist_task(id="1", content="A", due_date="2026-06-28")]

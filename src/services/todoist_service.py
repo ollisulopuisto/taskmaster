@@ -44,6 +44,8 @@ class TodoistService:
                     continue
                 if raw.due is None or raw.due.date is None:
                     continue
+                if getattr(raw.due, "is_recurring", False):
+                    continue
 
                 due = self._parse_date(raw.due.date)
                 if due is None or due > reference:

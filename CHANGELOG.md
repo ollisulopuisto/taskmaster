@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.07.23.31] - 2026-07-23
+
+### Changed
+
+- **todoist**: Exclude recurring tasks (`raw.due.is_recurring == True`) during task ingestion in `TodoistService.get_todays_tasks()`.
+
 ## [v26.07.22.30] - 2026-07-22
 
 ### Added
