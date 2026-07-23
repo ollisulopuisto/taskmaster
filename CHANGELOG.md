@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.07.23.32] - 2026-07-23
+
+### Fixed
+
+- **tui**: Wrap synchronous network I/O and LLM service calls (`todoist`, `gcal`, `llm`) in `asyncio.to_thread` in Textual TUI action handlers to prevent UI thread freezing.
+
 ## [v26.07.23.31] - 2026-07-23
 
 ### Changed

@@ -6,6 +6,7 @@ and full parity with the Streamlit Web UI.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import datetime
 from typing import Any
@@ -262,7 +263,7 @@ class TaskMasterApp(App):
         from datetime import timedelta
 
         tomorrow = datetime.now().date() + timedelta(days=1)
-        todoist.sync_plan_priorities(self.morning_plan, tomorrow=tomorrow)
+        await asyncio.to_thread(todoist.sync_plan_priorities, self.morning_plan, tomorrow=tomorrow)
         plan_text.update("[bold green]✔ Plan synced to Todoist![/bold green]")
 
     async def action_generate_plan(self) -> None:
@@ -273,13 +274,15 @@ class TaskMasterApp(App):
         plan_text.update("[bold cyan]Asking local LLM for today's 1-3-5 plan...[/bold cyan]")
 
         todoist, gcal, llm = get_services()
-        tasks = todoist.get_todays_tasks()
-        events = gcal.get_todays_events()
+        tasks = await asyncio.to_thread(todoist.get_todays_tasks)
+        events = await asyncio.to_thread(gcal.get_todays_events)
 
         tz = ZoneInfo(os.getenv("TIMEZONE", "Europe/Helsinki"))
         day_start = datetime.now(tz=tz).replace(hour=8, minute=0, second=0)
         day_end = datetime.now(tz=tz).replace(hour=18, minute=0, second=0)
-        free_blocks = gcal.get_free_time_blocks(day_start=day_start, day_end=day_end)
+        free_blocks = await asyncio.to_thread(
+            gcal.get_free_time_blocks, day_start=day_start, day_end=day_end
+        )
 
         self.schedule_events = events
         self.free_blocks = free_blocks
@@ -308,7 +311,7 @@ class TaskMasterApp(App):
         sched_text.update(sched_table)
 
         # Call LLM
-        plan = llm.plan_triage(tasks=tasks, free_blocks=free_blocks)
+        plan = await asyncio.to_thread(llm.plan_triage, tasks=tasks, free_blocks=free_blocks)
         self.morning_plan = plan
         await self.render_plan_table()
 
@@ -330,7 +333,7 @@ class TaskMasterApp(App):
 
         tomorrow = datetime.now().date() + timedelta(days=1)
         for task in self.all_tasks:
-            todoist.postpone_task(task.id, tomorrow)
+            await asyncio.to_thread(todoist.postpone_task, task.id, tomorrow)
 
         evening_text.update(
             f"[bold green]✔ Debrief logged. {len(self.all_tasks)} tasks rolled over.[/bold green]"
@@ -341,13 +344,15 @@ class TaskMasterApp(App):
         debug_text.update("[dim]Fetching raw service data...[/dim]")
 
         todoist, gcal, llm = get_services()
-        tasks = todoist.get_todays_tasks()
-        events = gcal.get_todays_events()
+        tasks = await asyncio.to_thread(todoist.get_todays_tasks)
+        events = await asyncio.to_thread(gcal.get_todays_events)
 
         tz = ZoneInfo(os.getenv("TIMEZONE", "Europe/Helsinki"))
         day_start = datetime.now(tz=tz).replace(hour=8, minute=0, second=0)
         day_end = datetime.now(tz=tz).replace(hour=18, minute=0, second=0)
-        free_blocks = gcal.get_free_time_blocks(day_start=day_start, day_end=day_end)
+        free_blocks = await asyncio.to_thread(
+            gcal.get_free_time_blocks, day_start=day_start, day_end=day_end
+        )
         prompt = llm._build_prompt(tasks, free_blocks)
 
         debug_table = Table(title="🔍 Debug Raw Ingested Data", expand=True)
