@@ -149,3 +149,16 @@ async def test_tui_submit_debrief_completes_and_postpones(mock_services):
         # Verify debrief executed
         debrief_text = app.query_one("#evening-text", Static)
         assert "Debrief logged" in str(debrief_text.content)
+
+
+@pytest.mark.anyio
+async def test_tui_backend_selector_renders_options(mock_services):
+    """Verify the Select widget for LLM backends renders in the TUI top bar."""
+    from textual.widgets import Select
+
+    app = TaskMasterApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        select_widget = app.query_one("#select-llm-backend", Select)
+        assert select_widget is not None
+        assert select_widget.value is not None

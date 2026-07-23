@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.07.23.34] - 2026-07-23
+
+### Added
+
+- **tui & llm**: Support multi-backend LLM configuration in `.env` (`LLM_BACKENDS`, `LLM_DEFAULT_BACKEND`, `LLM_BACKEND_<KEY>_*`). Add interactive backend `Select` dropdown widget to the Textual TUI top bar, enabling dynamic LLM switching (e.g. Local Gemma vs Google Gemini 3.5 Flash Lite) with `local` as default out of the box.
+
 ## [v26.07.23.33] - 2026-07-23
 
 ### Performance

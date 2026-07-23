@@ -20,6 +20,7 @@ from textual.widgets import (
     Button,
     Footer,
     Header,
+    Select,
     Static,
     TabbedContent,
     TabPane,
@@ -33,7 +34,7 @@ from services.todoist_service import TodoistService
 load_dotenv(override=False)
 
 
-def get_services() -> tuple[TodoistService, GCalService, LLMService]:
+def get_services(backend_key: str | None = None) -> tuple[TodoistService, GCalService, LLMService]:
     """Instantiate services using environment variables."""
     calendar_ids = [
         cid.strip() for cid in os.getenv("GOOGLE_CALENDAR_IDS", "primary").split(",") if cid.strip()
@@ -43,7 +44,7 @@ def get_services() -> tuple[TodoistService, GCalService, LLMService]:
         calendar_ids=calendar_ids,
         credentials_path=os.getenv("GOOGLE_CREDENTIALS_PATH", "credentials.json"),
     )
-    llm = LLMService.from_env()
+    llm = LLMService.from_env(backend_key=backend_key)
     return todoist, gcal, llm
 
 
@@ -78,6 +79,10 @@ class TaskMasterApp(App):
         width: 1fr;
         margin: 0 1;
     }
+    .backend-select {
+        width: 1fr;
+        margin: 0 1;
+    }
     .task-row {
         height: 3;
         margin: 1 0;
@@ -108,9 +113,34 @@ class TaskMasterApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
+        backend_options: list[tuple[str, str]] = []
+        try:
+            backends = LLMService.get_available_backends()
+            if isinstance(backends, dict):
+                backend_options = [(cfg.name, cfg.key) for cfg in backends.values()]
+        except Exception:
+            pass
+
+        if not backend_options:
+            backend_options = [("Default LLM", "default")]
+
+        default_backend = os.getenv("LLM_DEFAULT_BACKEND", "").strip()
+        default_backend_key = (
+            default_backend
+            if default_backend in [opt[1] for opt in backend_options]
+            else backend_options[0][1]
+        )
+
         with TabbedContent(initial="tab-morning", id="main-tabs"):
             with TabPane("Morning Triage", id="tab-morning"):
                 with Horizontal(classes="top-bar"):
+                    yield Select(
+                        backend_options,
+                        value=default_backend_key,
+                        id="select-llm-backend",
+                        allow_blank=False,
+                        classes="backend-select",
+                    )
                     yield Button(
                         "⚡ Generate Plan (G)",
                         id="btn-generate-plan",
@@ -270,10 +300,15 @@ class TaskMasterApp(App):
         sched_text = self.query_one("#schedule-text", Static)
         plan_text = self.query_one("#plan-text", Static)
 
-        sched_text.update("[dim]Fetching Todoist & Google Calendar data...[/dim]")
-        plan_text.update("[bold cyan]Asking local LLM for today's 1-3-5 plan...[/bold cyan]")
+        backend_select = self.query_one("#select-llm-backend", Select)
+        selected_backend = str(backend_select.value) if backend_select.value else None
 
-        todoist, gcal, llm = get_services()
+        sched_text.update("[dim]Fetching Todoist & Google Calendar data...[/dim]")
+        plan_text.update(
+            f"[bold cyan]Asking LLM ({selected_backend}) for today's 1-3-5 plan...[/bold cyan]"
+        )
+
+        todoist, gcal, llm = get_services(backend_key=selected_backend)
         tasks = await asyncio.to_thread(todoist.get_todays_tasks)
         events = await asyncio.to_thread(gcal.get_todays_events)
 
@@ -343,7 +378,10 @@ class TaskMasterApp(App):
         debug_text = self.query_one("#debug-text", Static)
         debug_text.update("[dim]Fetching raw service data...[/dim]")
 
-        todoist, gcal, llm = get_services()
+        backend_select = self.query_one("#select-llm-backend", Select)
+        selected_backend = str(backend_select.value) if backend_select.value else None
+
+        todoist, gcal, llm = get_services(backend_key=selected_backend)
         tasks = await asyncio.to_thread(todoist.get_todays_tasks)
         events = await asyncio.to_thread(gcal.get_todays_events)
 

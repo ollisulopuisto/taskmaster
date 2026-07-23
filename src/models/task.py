@@ -37,6 +37,17 @@ class TimeBlock(BaseModel):
     end: str  # ISO-8601 duration (e.g. "PT1H") or end datetime
 
 
+class LLMBackendConfig(BaseModel):
+    """Configuration for an individual LLM backend."""
+
+    key: str
+    name: str
+    base_url: str
+    model: str
+    api_key: str = "ollama"
+    timeout: float = 600.0
+
+
 class TriagePlanIDs(BaseModel):
     """Lightweight structured LLM output containing task IDs per category."""
 

@@ -23,7 +23,7 @@ import httpx
 import instructor
 from openai import OpenAI
 
-from models.task import Task, TriagePlan, TriagePlanIDs
+from models.task import LLMBackendConfig, Task, TriagePlan, TriagePlanIDs
 
 
 class LLMService:
@@ -49,24 +49,77 @@ class LLMService:
             self._cache_dir.mkdir(parents=True, exist_ok=True)
 
     @classmethod
-    def from_env(cls) -> LLMService:
+    def get_available_backends(cls) -> dict[str, LLMBackendConfig]:
+        """Discover available LLM backends defined in environment variables.
+
+        Supports multi-backend configuration via LLM_BACKENDS (comma-separated list of keys,
+        e.g. `local, gemini`) with per-backend settings `LLM_BACKEND_<KEY>_*`.
+
+        Falls back to reading single LLM_* or OLLAMA_* variables if LLM_BACKENDS is not defined.
+        """
+        raw_backends = os.getenv("LLM_BACKENDS", "").strip()
+        backends: dict[str, LLMBackendConfig] = {}
+
+        if raw_backends:
+            keys = [k.strip() for k in raw_backends.split(",") if k.strip()]
+            for k in keys:
+                upper_key = k.upper()
+                name = os.getenv(f"LLM_BACKEND_{upper_key}_NAME", f"Backend {k}")
+                base_url = os.getenv(
+                    f"LLM_BACKEND_{upper_key}_BASE_URL", "http://localhost:8000/v1"
+                )
+                model = os.getenv(f"LLM_BACKEND_{upper_key}_MODEL", "gemma4")
+                api_key = os.getenv(f"LLM_BACKEND_{upper_key}_API_KEY", "ollama")
+                timeout = float(os.getenv(f"LLM_BACKEND_{upper_key}_TIMEOUT", "600.0"))
+                backends[k] = LLMBackendConfig(
+                    key=k,
+                    name=name,
+                    base_url=base_url,
+                    model=model,
+                    api_key=api_key,
+                    timeout=timeout,
+                )
+
+        if not backends:
+            model = os.getenv("LLM_MODEL") or os.getenv("OLLAMA_MODEL", "gemma4")
+            base_url = os.getenv("LLM_BASE_URL") or os.getenv(
+                "OLLAMA_BASE_URL", "http://localhost:8000/v1"
+            )
+            api_key = os.getenv("LLM_API_KEY") or os.getenv("OLLAMA_API_KEY", "ollama")
+            timeout = float(os.getenv("LLM_TIMEOUT", "600.0"))
+            name = os.getenv("LLM_NAME", f"Default LLM ({model})")
+            backends["default"] = LLMBackendConfig(
+                key="default",
+                name=name,
+                base_url=base_url,
+                model=model,
+                api_key=api_key,
+                timeout=timeout,
+            )
+
+        return backends
+
+    @classmethod
+    def from_env(cls, backend_key: str | None = None) -> LLMService:
         """Instantiate LLMService from environment variables (.env).
 
-        Supports local LLMs (llama-server / Ollama) as well as OpenRouter,
-        Google Gemini OpenAI endpoint, or OpenAI directly without code duplication.
+        If `backend_key` is provided, selects that configured backend.
+        Otherwise uses `LLM_DEFAULT_BACKEND` or the first available backend.
         """
-        model = os.getenv("LLM_MODEL") or os.getenv("OLLAMA_MODEL", "gemma4")
-        base_url = os.getenv("LLM_BASE_URL") or os.getenv(
-            "OLLAMA_BASE_URL", "http://localhost:8000/v1"
-        )
-        api_key = os.getenv("LLM_API_KEY") or os.getenv("OLLAMA_API_KEY", "ollama")
-        timeout = float(os.getenv("LLM_TIMEOUT", "600.0"))
+        backends = cls.get_available_backends()
+        target_key = backend_key or os.getenv("LLM_DEFAULT_BACKEND", "").strip()
+
+        if target_key and target_key in backends:
+            config = backends[target_key]
+        else:
+            config = next(iter(backends.values()))
+
         cache_dir = os.getenv("LLM_CACHE_DIR", ".cache")
         return cls(
-            model=model,
-            base_url=base_url,
-            api_key=api_key,
-            timeout=timeout,
+            model=config.model,
+            base_url=config.base_url,
+            api_key=config.api_key,
+            timeout=config.timeout,
             cache_dir=cache_dir,
         )
 
@@ -119,7 +172,7 @@ class LLMService:
                 {"role": "user", "content": prompt},
             ],
             response_model=TriagePlanIDs,
-            max_tokens=1024,
+            max_tokens=4096,
         )
 
         def _get_id(item: Any) -> str:

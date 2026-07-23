@@ -96,7 +96,7 @@ class TestLLMService:
         call_kwargs = fake_client.chat.completions.create.call_args.kwargs
         # instructor passes the pydantic model as response_model
         assert call_kwargs.get("response_model") is TriagePlanIDs
-        assert call_kwargs.get("max_tokens") == 1024
+        assert call_kwargs.get("max_tokens") == 4096
 
     def test_plan_triage_handles_empty_task_list(self) -> None:
         fake_instructor = self._fake_instructor()
@@ -198,6 +198,7 @@ class TestLLMService:
 
     def test_from_env_reads_gemini_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """LLMService.from_env() prioritizes LLM_BASE_URL, LLM_MODEL, and LLM_API_KEY."""
+        monkeypatch.delenv("LLM_BACKENDS", raising=False)
         monkeypatch.setenv(
             "LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/"
         )
@@ -209,6 +210,7 @@ class TestLLMService:
 
     def test_from_env_falls_back_to_ollama_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """LLMService.from_env() falls back to OLLAMA_* when LLM_* are unset."""
+        monkeypatch.delenv("LLM_BACKENDS", raising=False)
         monkeypatch.delenv("LLM_BASE_URL", raising=False)
         monkeypatch.delenv("LLM_MODEL", raising=False)
         monkeypatch.delenv("LLM_API_KEY", raising=False)
@@ -217,6 +219,37 @@ class TestLLMService:
 
         service = LLMService.from_env()
         assert service._model == "gemma4"
+
+    def test_get_available_backends_parses_custom_backends(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verify LLMService parses multiple LLM backends defined in env vars."""
+        monkeypatch.setenv("LLM_BACKENDS", "local, gemini")
+        monkeypatch.setenv("LLM_DEFAULT_BACKEND", "gemini")
+        monkeypatch.setenv("LLM_BACKEND_LOCAL_NAME", "Local Gemma 12B")
+        monkeypatch.setenv("LLM_BACKEND_LOCAL_BASE_URL", "http://127.0.0.1:8000/v1")
+        monkeypatch.setenv("LLM_BACKEND_LOCAL_MODEL", "gemma4")
+        monkeypatch.setenv("LLM_BACKEND_GEMINI_NAME", "Google Gemini 3.5 Flash Lite")
+        monkeypatch.setenv(
+            "LLM_BACKEND_GEMINI_BASE_URL",
+            "https://generativelanguage.googleapis.com/v1beta/openai/",
+        )
+        monkeypatch.setenv("LLM_BACKEND_GEMINI_MODEL", "gemini-3.5-flash-lite")
+        monkeypatch.setenv("LLM_BACKEND_GEMINI_API_KEY", "test-gemini-key")
+
+        backends = LLMService.get_available_backends()
+        assert "local" in backends
+        assert "gemini" in backends
+        assert backends["local"].name == "Local Gemma 12B"
+        assert backends["gemini"].model == "gemini-3.5-flash-lite"
+
+        # Test selecting specific backend
+        gemini_svc = LLMService.from_env(backend_key="gemini")
+        assert gemini_svc._model == "gemini-3.5-flash-lite"
+
+        # Test default backend selection
+        default_svc = LLMService.from_env()
+        assert default_svc._model == "gemini-3.5-flash-lite"
 
 
 class TestBuildPrompt:
