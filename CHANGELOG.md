@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.07.23.38] - 2026-07-23
+
+### Documentation
+
+- **docs**: Comprehensive overhaul of `README.md` and `AGENTS.md` covering Textual TUI & autonomous CLI usage, multi-backend LLM settings, duration tracking, payload caching, and GitHub repository details.
+
 ## [v26.07.23.37] - 2026-07-23
 
 ### Changed

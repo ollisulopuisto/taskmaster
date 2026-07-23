@@ -4,29 +4,35 @@ This file captures repo-specific facts that are easy to miss. Prefer it over re-
 
 ## Project state
 
-This repo is **not yet scaffolded**. There is no `pyproject.toml`, no source code, and no commits — only `PLAN.md`. Before running any command below, the project must be initialized with `uv init` and dependencies installed.
+This repo is **fully scaffolded and functional**. It features a Textual TUI, autonomous CLI, multi-backend LLM support, disk caching, and comprehensive unit tests.
 
-## Stack (from `PLAN.md`)
+## Stack
 
-- **Language:** Python
-- **Package manager:** `uv` (not pip/poetry)
-- **Backend:** FastAPI + Uvicorn
-- **Frontend (V1):** Streamlit (all-Python, preferred); React + Vite + Tailwind is the alternative
-- **LLM:** local Ollama via `litellm` or `instructor` (structured JSON output)
+- **Language:** Python 3.13+
+- **Package manager:** `uv`
+- **UI:** Textual TUI (`src/tui.py`, preferred) & Streamlit Web UI (`app.py`)
+- **Backend:** FastAPI + Uvicorn (`src/main.py`)
+- **LLM Integration:** OpenAI-compatible API (llama-server, Ollama, Google Gemini, OpenRouter) via `instructor` + Pydantic models
 - **Testing:** `pytest` + `pytest-mock`
 - **Lint/format:** `ruff`
 
-## Commands (only valid after scaffolding)
+## Commands
 
 ```bash
-uv init
-uv add fastapi uvicorn pytest pytest-mock ruff todoist-api-python google-api-python-client litellm pydantic
+# Run interactive Textual TUI (preferred)
+uv run python src/cli.py
+
+# Run autonomous CLI (for cron / LaunchAgent)
+uv run python src/cli.py --auto
+
+# Run single test or full suite
+uv run pytest
+uv run pytest tests/test_tui.py::test_tui_initial_render
+
+# Formatting & linting
 uv run ruff format .
 uv run ruff check . --fix
-uv run pytest
 ```
-
-There is no way to run a single test yet — `tests/` does not exist. Once it does, use `uv run pytest tests/path/test_file.py::test_name`.
 
 ## Required workflow order
 
