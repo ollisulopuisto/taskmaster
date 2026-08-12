@@ -77,7 +77,7 @@ def test_cli_dry_run_flag(capsys):
         plan = run_cli(auto=True, dry_run=True, sync=True)
 
         assert plan == mock_plan
-        mock_todoist.sync_plan_priorities.assert_not_called()
+        mock_todoist.sync_plan_tags.assert_not_called()
         captured = capsys.readouterr()
         assert "DRY RUN" in captured.out
 
@@ -110,7 +110,7 @@ def test_cli_sync_flag():
         plan = run_cli(auto=True, dry_run=False, sync=True)
 
         assert plan == mock_plan
-        mock_todoist.sync_plan_priorities.assert_called_once()
+        mock_todoist.sync_plan_tags.assert_called_once()
 
 
 def test_render_triage_plan_includes_postponed_tasks(capsys):

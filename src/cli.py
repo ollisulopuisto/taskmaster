@@ -141,8 +141,8 @@ def run_cli(
             )
         elif sync:
             tomorrow = datetime.now().date() + timedelta(days=1)
-            todoist.sync_plan_priorities(plan, tomorrow=tomorrow)
-            console.print("[green]✔ Plan priorities synced to Todoist.[/green]")
+            todoist.sync_plan_tags(plan, tomorrow=tomorrow)
+            console.print("[green]✔ Plan tags synced to Todoist.[/green]")
 
         if auto:
             console.print("[green]✔ Autonomous morning triage completed successfully.[/green]")

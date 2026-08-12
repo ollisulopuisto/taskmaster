@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.08.12.43] - 2026-08-12
+
+### Changed
+
+- **todoist**: Replace priority overwriting with non-destructive label tags (`big`, `medium`, `small`) in `sync_plan_tags()`, preserving intrinsic Todoist priorities across daily triage sessions.
+
 ## [v26.08.12.42] - 2026-08-12
 
 ### Added

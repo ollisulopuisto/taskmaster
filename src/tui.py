@@ -315,7 +315,7 @@ class TaskMasterApp(App):
         from datetime import timedelta
 
         tomorrow = datetime.now().date() + timedelta(days=1)
-        await asyncio.to_thread(todoist.sync_plan_priorities, self.morning_plan, tomorrow=tomorrow)
+        await asyncio.to_thread(todoist.sync_plan_tags, self.morning_plan, tomorrow=tomorrow)
         plan_text.update("[bold green]✔ Plan synced to Todoist![/bold green]")
 
     async def action_generate_plan(self) -> None:

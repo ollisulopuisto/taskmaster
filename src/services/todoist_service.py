@@ -96,22 +96,42 @@ class TodoistService:
                 )
         return normalized
 
-    def sync_plan_priorities(self, plan: TriagePlan, tomorrow: date) -> None:
-        """Sync accepted 1-3-5 plan priorities and postponed tasks back to Todoist.
+    DEFAULT_SIZE_LABELS = {"big", "medium", "small"}
 
-        BIG -> P1 (priority=4)
-        MEDIUM -> P2 (priority=3)
-        SMALL -> P3 (priority=2)
-        POSTPONED -> postponed to tomorrow
+    def sync_plan_tags(
+        self, plan: TriagePlan, tomorrow: date, size_labels: Iterable[str] | None = None
+    ) -> None:
+        """Sync accepted 1-3-5 plan tags and postponed tasks back to Todoist.
+
+        BIG -> adds "big" label (preserves intrinsic Todoist priority)
+        MEDIUM -> adds "medium" label
+        SMALL -> adds "small" label
+        POSTPONED -> strips size labels and postpones due date to tomorrow
         """
+        known_size_labels = {lbl.lower() for lbl in (size_labels or self.DEFAULT_SIZE_LABELS)}
+
+        def _clean_and_tag(existing_labels: list[str], new_tag: str | None) -> list[str]:
+            cleaned = [lbl for lbl in existing_labels if lbl.lower() not in known_size_labels]
+            if new_tag and new_tag not in cleaned:
+                cleaned.append(new_tag)
+            return cleaned
+
         for t in plan.big:
-            self._api.update_task(task_id=t.id, priority=4)
+            labels = _clean_and_tag(t.labels, "big")
+            self._api.update_task(task_id=t.id, labels=labels)
         for t in plan.medium:
-            self._api.update_task(task_id=t.id, priority=3)
+            labels = _clean_and_tag(t.labels, "medium")
+            self._api.update_task(task_id=t.id, labels=labels)
         for t in plan.small:
-            self._api.update_task(task_id=t.id, priority=2)
+            labels = _clean_and_tag(t.labels, "small")
+            self._api.update_task(task_id=t.id, labels=labels)
         for t in plan.postponed:
-            self.postpone_task(task_id=t.id, new_date=tomorrow)
+            labels = _clean_and_tag(t.labels, None)
+            self._api.update_task(task_id=t.id, due_date=tomorrow, labels=labels)
+
+    def sync_plan_priorities(self, plan: TriagePlan, tomorrow: date) -> None:
+        """Deprecated alias for sync_plan_tags."""
+        self.sync_plan_tags(plan, tomorrow)
 
     @staticmethod
     def _parse_date(value: str | date | datetime) -> date | None:
