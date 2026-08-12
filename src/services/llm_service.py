@@ -51,11 +51,77 @@ class LLMService:
             self._cache_dir.mkdir(parents=True, exist_ok=True)
 
     @classmethod
-    def get_available_backends(cls) -> dict[str, LLMBackendConfig]:
+    def discover_local_backends(
+        cls, target_ports: list[int] | None = None
+    ) -> dict[str, LLMBackendConfig]:
+        """Probe local ports for running OpenAI-compatible or Ollama LLM servers."""
+        ports = target_ports if target_ports is not None else [8000, 11434, 1234]
+        discovered: dict[str, LLMBackendConfig] = {}
+
+        client = httpx.Client(timeout=2.0)
+        try:
+            for port in ports:
+                base_v1 = f"http://localhost:{port}/v1"
+                # 1. Try standard OpenAI /v1/models
+                try:
+                    res = client.get(f"{base_v1}/models")
+                    if res.status_code == 200:
+                        data = res.json()
+                        models_list = data.get("data", [])
+                        for item in models_list:
+                            model_id = item.get("id") if isinstance(item, dict) else str(item)
+                            if model_id:
+                                clean_id = model_id.replace(":", "_").replace("/", "_")
+                                key = f"auto_{port}_{clean_id}"
+                                name = f"⚡ Discovered (Port {port}): {model_id}"
+                                discovered[key] = LLMBackendConfig(
+                                    key=key,
+                                    name=name,
+                                    base_url=base_v1,
+                                    model=model_id,
+                                    api_key="ollama",
+                                )
+                except Exception:
+                    pass
+
+                # 2. Try Ollama native /api/tags
+                if port == 11434 or not any(k.startswith(f"auto_{port}_") for k in discovered):
+                    try:
+                        res = client.get(f"http://localhost:{port}/api/tags")
+                        if res.status_code == 200:
+                            data = res.json()
+                            models_list = data.get("models", [])
+                            for item in models_list:
+                                model_name = (
+                                    item.get("name") if isinstance(item, dict) else str(item)
+                                )
+                                if model_name:
+                                    clean_name = model_name.replace(":", "_").replace("/", "_")
+                                    key = f"auto_{port}_{clean_name}"
+                                    if key not in discovered:
+                                        name = f"⚡ Discovered Ollama (Port {port}): {model_name}"
+                                        discovered[key] = LLMBackendConfig(
+                                            key=key,
+                                            name=name,
+                                            base_url=base_v1,
+                                            model=model_name,
+                                            api_key="ollama",
+                                        )
+                    except Exception:
+                        pass
+        finally:
+            client.close()
+
+        return discovered
+
+    @classmethod
+    def get_available_backends(cls, autodiscover: bool = False) -> dict[str, LLMBackendConfig]:
         """Discover available LLM backends defined in environment variables.
 
         Supports multi-backend configuration via LLM_BACKENDS (comma-separated list of keys,
         e.g. `local, gemini`) with per-backend settings `LLM_BACKEND_<KEY>_*`.
+
+        If `autodiscover` is True, also probes running local servers (Ollama, llama-server, etc.).
 
         Falls back to reading single LLM_* or OLLAMA_* variables if LLM_BACKENDS is not defined.
         """
@@ -99,6 +165,10 @@ class LLMService:
                 timeout=timeout,
             )
 
+        if autodiscover:
+            discovered = cls.discover_local_backends()
+            backends.update(discovered)
+
         return backends
 
     @classmethod
@@ -110,6 +180,9 @@ class LLMService:
         """
         backends = cls.get_available_backends()
         target_key = backend_key or os.getenv("LLM_DEFAULT_BACKEND", "").strip()
+
+        if target_key and target_key not in backends:
+            backends = cls.get_available_backends(autodiscover=True)
 
         if target_key and target_key in backends:
             config = backends[target_key]

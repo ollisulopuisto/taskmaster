@@ -178,6 +178,41 @@ async def test_tui_displays_execution_duration(mock_services):
         assert "⏱️" in str(plan_text.content.title)
 
 
+@pytest.mark.anyio
+async def test_tui_discover_llms_button(mock_services):
+    """Clicking Discover LLMs button triggers autodiscovery and updates backend options."""
+    from textual.widgets import Select
+
+    from models.task import LLMBackendConfig
+
+    discovered_cfg = LLMBackendConfig(
+        key="auto_8000_gemma",
+        name="[Discovered 8000] gemma:latest",
+        base_url="http://localhost:8000/v1",
+        model="gemma:latest",
+    )
+
+    with patch(
+        "tui.LLMService.get_available_backends",
+        return_value={
+            "default": LLMBackendConfig(
+                key="default", name="Default", base_url="http://x", model="m"
+            ),
+            "auto_8000_gemma": discovered_cfg,
+        },
+    ):
+        app = TaskMasterApp()
+        async with app.run_test() as pilot:
+            await pilot.click("#btn-discover-llm")
+            await pilot.pause()
+
+            select_widget = app.query_one("#select-llm-backend", Select)
+            assert select_widget is not None
+            # Check options updated to include auto_8000_gemma
+            option_values = [opt[1] for opt in select_widget._options]
+            assert "auto_8000_gemma" in option_values
+
+
 def test_format_duration():
     from tui import format_duration
 

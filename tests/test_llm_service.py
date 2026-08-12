@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from models.task import Task, TriagePlan, TriagePlanIDs
+from models.task import LLMBackendConfig, Task, TriagePlan, TriagePlanIDs
 from services.llm_service import LLMService
 
 
@@ -250,6 +250,78 @@ class TestLLMService:
         # Test default backend selection
         default_svc = LLMService.from_env()
         assert default_svc._model == "gemini-3.5-flash-lite"
+
+    def test_discover_local_backends_finds_openai_compatible_models(self) -> None:
+        """Verify discover_local_backends identifies local models from /v1/models endpoint."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": [{"id": "gemma-4-12b-it.gguf"}, {"id": "llama-3.2-3b"}]
+        }
+
+        with patch("httpx.Client.get", return_value=mock_response):
+            discovered = LLMService.discover_local_backends(target_ports=[8000])
+
+        assert len(discovered) == 2
+        keys = list(discovered.keys())
+        assert (
+            "auto_8000_gemma-4-12b-it.gguf" in keys
+            or "auto_8000_gemma_4_12b_it_gguf" in keys
+            or any("gemma" in k for k in keys)
+        )
+        found_cfg = next(c for c in discovered.values() if c.model == "llama-3.2-3b")
+        assert found_cfg.base_url == "http://localhost:8000/v1"
+
+    def test_discover_local_backends_finds_ollama_tags(self) -> None:
+        """Verify discover_local_backends identifies local models from Ollama /api/tags endpoint."""
+
+        def mock_get(url: str, **kwargs: object) -> MagicMock:
+            res = MagicMock()
+            if "/api/tags" in url:
+                res.status_code = 200
+                res.json.return_value = {"models": [{"name": "qwen2.5-coder:latest"}]}
+            else:
+                res.status_code = 404
+                res.json.return_value = {}
+            return res
+
+        with patch("httpx.Client.get", side_effect=mock_get):
+            discovered = LLMService.discover_local_backends(target_ports=[11434])
+
+        found_cfg = next((c for c in discovered.values() if "qwen" in c.model), None)
+        assert found_cfg is not None
+        assert found_cfg.base_url == "http://localhost:11434/v1"
+
+    def test_discover_local_backends_handles_connection_error(self) -> None:
+        """Verify network errors during discovery are caught gracefully."""
+        import httpx
+
+        with patch("httpx.Client.get", side_effect=httpx.ConnectError("Connection refused")):
+            discovered = LLMService.discover_local_backends(target_ports=[9999])
+
+        assert discovered == {}
+
+    def test_get_available_backends_with_autodiscover(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verify get_available_backends(autodiscover=True) merges env and discovered backends."""
+        monkeypatch.setenv("LLM_BACKENDS", "local")
+        monkeypatch.setenv("LLM_BACKEND_LOCAL_NAME", "Local Gemma")
+
+        mock_discovered = {
+            "auto_11434_ollama": LLMBackendConfig(
+                key="auto_11434_ollama",
+                name="[Discovered 11434] ollama:latest",
+                base_url="http://localhost:11434/v1",
+                model="ollama:latest",
+            )
+        }
+
+        with patch.object(LLMService, "discover_local_backends", return_value=mock_discovered):
+            backends = LLMService.get_available_backends(autodiscover=True)
+
+        assert "local" in backends
+        assert "auto_11434_ollama" in backends
 
 
 class TestBuildPrompt:

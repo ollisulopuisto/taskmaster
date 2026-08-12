@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.08.12.45] - 2026-08-12
+
+### Added
+
+- **llm**: Add local LLM server autodiscovery (`LLMService.discover_local_backends()`) targeting common ports (`8000`, `11434`, `1234`) and standard OpenAI/Ollama endpoints.
+- **tui**: Add "🔄 Discover LLMs" action button to Textual TUI top bar to probe active local model servers and dynamically populate the backend selector.
+
 ## [v26.08.12.44] - 2026-08-12
 
 ### Fixed

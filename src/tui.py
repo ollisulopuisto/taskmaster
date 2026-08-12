@@ -159,6 +159,12 @@ class TaskMasterApp(App):
                         classes="backend-select",
                     )
                     yield Button(
+                        "🔄 Discover LLMs",
+                        id="btn-discover-llm",
+                        variant="default",
+                        classes="action-btn",
+                    )
+                    yield Button(
                         "⚡ Generate Plan (G)",
                         id="btn-generate-plan",
                         variant="primary",
@@ -216,6 +222,8 @@ class TaskMasterApp(App):
             if self.morning_plan:
                 self.morning_plan = self.morning_plan.reassign_task(task_id, target)
                 await self.render_plan_table()
+        elif button_id == "btn-discover-llm":
+            await self.action_discover_llms()
         elif button_id == "btn-generate-plan":
             await self.action_generate_plan()
         elif button_id == "btn-sync-plan":
@@ -224,6 +232,31 @@ class TaskMasterApp(App):
             await self.action_submit_debrief()
         elif button_id == "btn-fetch-debug":
             await self.action_fetch_debug()
+
+    async def action_discover_llms(self) -> None:
+        """Autodiscover running local LLM servers and update backend dropdown options."""
+        plan_text = self.query_one("#plan-text", Static)
+        plan_text.update(
+            "[dim]Probing local ports for active LLM servers (8000, 11434, 1234)...[/dim]"
+        )
+
+        backends = await asyncio.to_thread(LLMService.get_available_backends, autodiscover=True)
+        options = [(cfg.name, cfg.key) for cfg in backends.values()]
+
+        backend_select = self.query_one("#select-llm-backend", Select)
+        curr_val = backend_select.value
+        backend_select.set_options(options)
+
+        if curr_val in [opt[1] for opt in options]:
+            backend_select.value = curr_val
+        elif options:
+            backend_select.value = options[0][1]
+
+        disc_count = sum(1 for k in backends if k.startswith("auto_"))
+        plan_text.update(
+            f"[bold green]✔ LLM Discovery complete: Found {len(backends)} backend(s) "
+            f"({disc_count} autodiscovered local model(s)).[/bold green]"
+        )
 
     async def render_plan_table(self) -> None:
         """Render the 1-3-5 plan and proposed postponed tasks with interactive reassign buttons."""
