@@ -30,17 +30,21 @@ def test_cli_auto_mode(capsys, pytestconfig):
     ):
         mock_todoist = MagicMock()
         mock_todoist.get_todays_tasks.return_value = mock_tasks
+        mock_todoist.validate_credentials.return_value = (True, "Valid")
         mock_todoist_cls.return_value = mock_todoist
 
         mock_gcal = MagicMock()
         mock_gcal.get_todays_events.return_value = mock_events
         mock_gcal.get_free_time_blocks.return_value = mock_blocks
+        mock_gcal.validate_credentials.return_value = (True, "Valid")
         mock_gcal_cls.return_value = mock_gcal
+        mock_gcal_cls.validate_credentials_static.return_value = (True, "Valid")
 
         mock_llm = MagicMock()
         mock_llm.plan_triage.return_value = mock_plan
         mock_llm_cls.return_value = mock_llm
         mock_llm_cls.from_env.return_value = mock_llm
+        mock_llm_cls.validate_backend.return_value = (True, "Valid")
 
         plan = run_cli(auto=True)
 
@@ -63,16 +67,20 @@ def test_cli_dry_run_flag(capsys):
     ):
         mock_todoist = MagicMock()
         mock_todoist.get_todays_tasks.return_value = mock_tasks
+        mock_todoist.validate_credentials.return_value = (True, "Valid")
         mock_todoist_cls.return_value = mock_todoist
 
         mock_gcal = MagicMock()
         mock_gcal.get_todays_events.return_value = []
         mock_gcal.get_free_time_blocks.return_value = []
+        mock_gcal.validate_credentials.return_value = (True, "Valid")
         mock_gcal_cls.return_value = mock_gcal
+        mock_gcal_cls.validate_credentials_static.return_value = (True, "Valid")
 
         mock_llm = MagicMock()
         mock_llm.plan_triage.return_value = mock_plan
         mock_llm_cls.from_env.return_value = mock_llm
+        mock_llm_cls.validate_backend.return_value = (True, "Valid")
 
         plan = run_cli(auto=True, dry_run=True, sync=True)
 
@@ -96,16 +104,20 @@ def test_cli_sync_flag():
     ):
         mock_todoist = MagicMock()
         mock_todoist.get_todays_tasks.return_value = mock_tasks
+        mock_todoist.validate_credentials.return_value = (True, "Valid")
         mock_todoist_cls.return_value = mock_todoist
 
         mock_gcal = MagicMock()
         mock_gcal.get_todays_events.return_value = []
         mock_gcal.get_free_time_blocks.return_value = []
+        mock_gcal.validate_credentials.return_value = (True, "Valid")
         mock_gcal_cls.return_value = mock_gcal
+        mock_gcal_cls.validate_credentials_static.return_value = (True, "Valid")
 
         mock_llm = MagicMock()
         mock_llm.plan_triage.return_value = mock_plan
         mock_llm_cls.from_env.return_value = mock_llm
+        mock_llm_cls.validate_backend.return_value = (True, "Valid")
 
         plan = run_cli(auto=True, dry_run=False, sync=True)
 
@@ -126,3 +138,36 @@ def test_render_triage_plan_includes_postponed_tasks(capsys):
     assert "POSTPONED" in captured.out
     assert "Postponed task" in captured.out
     assert "STALE" in captured.out
+
+
+def test_cli_precheck_gcal_failure(capsys):
+    """CLI pre-checks fail cleanly when GCal OAuth token is missing."""
+    import pytest
+
+    with (
+        patch("cli.TodoistService") as mock_todoist_cls,
+        patch("cli.GCalService") as mock_gcal_cls,
+        patch("cli.LLMService") as mock_llm_cls,
+    ):
+        mock_todoist = MagicMock()
+        mock_todoist.validate_credentials.return_value = (True, "Valid")
+        mock_todoist_cls.return_value = mock_todoist
+
+        mock_gcal = MagicMock()
+        mock_gcal_cls.return_value = mock_gcal
+        mock_gcal_cls.validate_credentials_static.return_value = (
+            False,
+            "Google Calendar OAuth token missing",
+        )
+
+        mock_llm = MagicMock()
+        mock_llm_cls.validate_backend.return_value = (True, "Valid")
+        mock_llm_cls.get_available_backends.return_value = {"default": MagicMock()}
+        mock_llm_cls.from_env.return_value = mock_llm
+
+        with pytest.raises(SystemExit):
+            run_cli(auto=True)
+
+        mock_gcal.get_todays_events.assert_not_called()
+        captured = capsys.readouterr()
+        assert "Google Calendar OAuth token missing" in captured.out

@@ -109,7 +109,31 @@ def run_cli(
     if not auto and not json_output:
         console.print("[dim]Fetching tasks from Todoist and events from Google Calendar...[/dim]")
 
+    # Run static pre-checks before creating services to prevent blocking OAuth consent flow hangs
+
+    credentials_path = os.getenv("GOOGLE_CREDENTIALS_PATH", "credentials.json")
+    gc_ok, gc_msg = GCalService.validate_credentials_static(credentials_path=credentials_path)
+    if not gc_ok:
+        console.print(f"[bold red]❌ Google Calendar Pre-check Failed: {gc_msg}[/bold red]")
+        raise SystemExit(1)
+
+    backends = LLMService.get_available_backends()
+    target_cfg = None
+    if isinstance(backends, dict) and backends:
+        target_cfg = backends.get(backend or "") or next(iter(backends.values()), None)
+
+    if target_cfg:
+        llm_ok, llm_msg = LLMService.validate_backend(target_cfg)
+        if not llm_ok:
+            console.print(f"[bold red]❌ LLM Pre-check Failed: {llm_msg}[/bold red]")
+            raise SystemExit(1)
+
     todoist, gcal, llm = get_services(backend_key=backend)
+
+    td_ok, td_msg = todoist.validate_credentials()
+    if not td_ok:
+        console.print(f"[bold red]❌ Todoist Pre-check Failed: {td_msg}[/bold red]")
+        raise SystemExit(1)
 
     tasks = todoist.get_todays_tasks()
     events = gcal.get_todays_events()
