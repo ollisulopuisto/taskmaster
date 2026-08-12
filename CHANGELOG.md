@@ -5,7 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.08.12.54] - 2026-08-12
+
+### Changed
+
+- **oauth**: Replace the manual code-paste `AuthModal` flow with a fully automatic local loopback callback server (`start_local_auth_server()`). A one-shot HTTP server binds on a random free port, the consent URL is opened in the browser, and the authorization code is captured automatically when Google redirects back — no copy-paste required.
+- **gcal**: Add `start_local_auth_server()` method to `GCalService`; anchored `credentials.json` / `token.json` paths to the project root via `_anchor()` so relative paths work from any working directory on any machine.
+- **tests**: Rewrite OAuth TUI tests to mock `start_local_auth_server` (4-tuple API); add `_auth_timeout` parameter to `action_auth_gcal` for deterministic timeout testing.
+
+## [v26.08.12.53] - 2026-08-12
+
+### Added
+
+- **llm**: Discover LLM servers on the LAN via mDNS/ZeroConf (`discover_lan_backends`); browsing `_ollama._tcp.local.`, `_llm._tcp.local.`, `_openai._tcp.local.` with a 120 s TTL cache.
+- **llm**: Opt-in subnet scan (`discover_subnet_backends`) probing LAN_LLM_PORTS across the local `/24` subnet.
+- **llm**: Local port probing (`discover_local_backends`) checks ports 8000, 11434, 1234 on startup.
+
 ## [v26.08.12.52] - 2026-08-12
+
 
 ### Added
 

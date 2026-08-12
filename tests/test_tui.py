@@ -310,52 +310,64 @@ async def test_tui_sync_plan_handles_error(mock_services):
 
 
 @pytest.mark.anyio
-async def test_tui_auth_gcal_opens_modal_and_completes(mock_services):
-    """Pressing 'a' shows the OAuth modal; submitting a code completes the flow."""
+async def test_tui_auth_gcal_completes_automatically(mock_services):
+    """OAuth flow completes automatically when the callback server receives the code."""
+    import threading
+
     mock_gcal = mock_services["gcal"]
     mock_flow = MagicMock()
-    mock_gcal.get_auth_url.return_value = (
+
+    # Pre-fire the done_event so the TUI doesn't actually wait.
+    done_event = threading.Event()
+    done_event.set()
+    code_box: list[str] = ["auto-captured-code"]
+
+    mock_gcal.start_local_auth_server.return_value = (
         mock_flow,
         "https://accounts.google.com/o/oauth2/auth?x=1",
+        done_event,
+        code_box,
     )
     mock_gcal.complete_auth.return_value = (True, "Google Calendar OAuth token saved.")
 
     app = TaskMasterApp()
     async with app.run_test() as pilot:
         await pilot.press("a")
-        await pilot.pause()
-
-        assert isinstance(app.screen, AuthModal)
-        modal = app.screen
-        assert mock_flow is app._oauth_flow
-        # URL is displayed to the user
-        assert "oauth2/auth?x=1" in str(modal.query_one("#auth-url").content)
-
-        code_input = modal.query_one("#auth-code")
-        code_input.value = "auth-code-123"
-        await pilot.click("#btn-auth-submit")
-        await pilot.pause()
+        await pilot.pause(0.2)
 
         plan_text = app.query_one("#plan-text", Static)
-        assert "OAuth complete" in str(plan_text.content)
+        assert "token saved" in str(plan_text.content).lower()
 
-    mock_gcal.complete_auth.assert_called_once_with(mock_flow, "auth-code-123")
+    mock_gcal.complete_auth.assert_called_once_with(mock_flow, "auto-captured-code")
 
 
 @pytest.mark.anyio
-async def test_tui_auth_gcal_cancel_skips_exchange(mock_services):
-    """Cancelling the modal does not attempt a code exchange."""
+async def test_tui_auth_gcal_timeout_reports_error(mock_services):
+    """When the OAuth callback times out, an error message is shown."""
+    import threading
+
     mock_gcal = mock_services["gcal"]
-    mock_gcal.get_auth_url.return_value = (MagicMock(), "https://accounts.google.com/oauth")
+    mock_flow = MagicMock()
+
+    # done_event that never fires — wait(0) returns False immediately.
+    done_event = threading.Event()  # not set
+    code_box: list[str] = [""]
+
+    mock_gcal.start_local_auth_server.return_value = (
+        mock_flow,
+        "https://accounts.google.com/o/oauth2/auth?x=1",
+        done_event,
+        code_box,
+    )
+
     app = TaskMasterApp()
     async with app.run_test() as pilot:
-        await pilot.press("a")
-        await pilot.pause()
-        await pilot.click("#btn-auth-cancel")
-        await pilot.pause()
+        # Call with _auth_timeout=0 so wait() returns False immediately.
+        await app.action_auth_gcal(_auth_timeout=0)
+        await pilot.pause(0.1)
 
         plan_text = app.query_one("#plan-text", Static)
-        assert "cancelled" in str(plan_text.content).lower()
+        assert "timed out" in str(plan_text.content).lower()
 
     mock_gcal.complete_auth.assert_not_called()
 
@@ -364,7 +376,7 @@ async def test_tui_auth_gcal_cancel_skips_exchange(mock_services):
 async def test_tui_auth_gcal_missing_credentials_reports_error(monkeypatch, mock_services):
     """Missing client secrets file is reported without opening a modal."""
     monkeypatch.setenv("GOOGLE_CREDENTIALS_PATH", "/nonexistent/credentials.json")
-    mock_services["gcal"].get_auth_url.side_effect = FileNotFoundError(
+    mock_services["gcal"].start_local_auth_server.side_effect = FileNotFoundError(
         "OAuth client secrets file missing at '/nonexistent/credentials.json'."
     )
     app = TaskMasterApp()

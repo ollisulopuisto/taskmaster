@@ -18,8 +18,12 @@ this order:
 from __future__ import annotations
 
 import os
+import threading
 from datetime import UTC, date, datetime
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
@@ -31,6 +35,28 @@ from models.task import TimeBlock
 
 SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
 _TOKEN_PATH = "token.json"
+# Project root = taskmaster/ (two levels up from src/services/)
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def _anchor(path: str) -> str:
+    """Resolve *path* relative to the project root when it is a bare filename.
+
+    If *path* is already absolute or contains directory separators it is
+    returned unchanged, so callers that already pass a full path still work.
+    """
+    p = Path(path)
+    if p.is_absolute() or len(p.parts) > 1:
+        return str(p)
+    return str(_PROJECT_ROOT / p)
+
+
+def _resolve_token_path(credentials_path: str, token_path: str) -> str:
+    """If token_path is a bare filename, place it next to credentials_path."""
+    if os.path.dirname(token_path):
+        return token_path
+    creds_dir = os.path.dirname(os.path.abspath(_anchor(credentials_path)))
+    return str(Path(creds_dir) / token_path)
 
 
 class GCalService:
@@ -43,8 +69,8 @@ class GCalService:
         token_path: str = _TOKEN_PATH,
     ) -> None:
         self._calendar_ids = calendar_ids or ["primary"]
-        self._credentials_path = credentials_path
-        self._token_path = token_path
+        self._credentials_path = _anchor(credentials_path)
+        self._token_path = _resolve_token_path(credentials_path, token_path)
         self._service_instance: Any = None
 
     @property
@@ -167,6 +193,73 @@ class GCalService:
         )
         url, _ = flow.authorization_url(access_type="offline", prompt="consent")
         return flow, url
+
+    def start_local_auth_server(
+        self,
+    ) -> tuple[Any, str, threading.Event, list[str]]:
+        """Start a local loopback HTTP server and return ``(flow, url, done_event, code_box)``.
+
+        Binds to a random free port on localhost, builds the OAuth URL pointing
+        at it, then starts a background thread that handles exactly one request
+        (the Google redirect) and stores the authorization code in ``code_box[0]``
+        before setting ``done_event``.  The caller should poll or wait on
+        ``done_event`` and read ``code_box[0]``.
+
+        >>> flow, url, done, code_box = gcal.start_local_auth_server()
+        >>> webbrowser.open(url)           # open in browser
+        >>> done.wait(timeout=120)         # wait up to 2 min
+        >>> gcal.complete_auth(flow, code_box[0])
+        """
+        self._ensure_credentials_file()
+
+        # Bind on a random free port to get the port number.
+        srv = HTTPServer(("127.0.0.1", 0), BaseHTTPRequestHandler)
+        port = srv.server_address[1]
+        srv.server_close()
+
+        redirect_uri = f"http://localhost:{port}"
+        flow = InstalledAppFlow.from_client_secrets_file(
+            self._credentials_path,
+            SCOPES,
+            redirect_uri=redirect_uri,
+        )
+        url, _ = flow.authorization_url(access_type="offline", prompt="consent")
+
+        done_event: threading.Event = threading.Event()
+        code_box: list[str] = [""]
+
+        class _Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_: Any) -> None:  # silence server logs
+                pass
+
+            def do_GET(self) -> None:  # noqa: N802
+                qs = parse_qs(urlparse(self.path).query)
+                codes = qs.get("code", [])
+                code_box[0] = codes[0] if codes else ""
+                body = (
+                    b"<html><body style='font-family:sans-serif;padding:2em'>"
+                    b"<h2>\xe2\x9c\x85 Kirjautuminen onnistui!</h2>"
+                    b"<p>Voit sulkea t\xc3\xa4m\xc3\xa4n v\xc3\xa4lilehden "
+                    b"ja palata sovellukseen.</p>"
+                    b"</body></html>"
+                )
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                done_event.set()
+
+        one_shot_server = HTTPServer(("127.0.0.1", port), _Handler)
+
+        def _serve() -> None:
+            one_shot_server.handle_request()  # blocks until one request arrives
+            one_shot_server.server_close()
+
+        t = threading.Thread(target=_serve, daemon=True)
+        t.start()
+
+        return flow, url, done_event, code_box
 
     def complete_auth(self, flow: Any, code: str) -> tuple[bool, str]:
         """Exchange an authorization code for tokens and persist them.

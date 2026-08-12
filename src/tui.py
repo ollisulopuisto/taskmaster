@@ -344,31 +344,54 @@ class TaskMasterApp(App):
         elif button_id == "btn-fetch-debug":
             await self.action_fetch_debug()
 
-    async def action_auth_gcal(self) -> None:
-        """Start interactive in-app OAuth flow for Google Calendar."""
+    async def action_auth_gcal(self, _auth_timeout: float = 120.0) -> None:
+        """Start automatic in-app OAuth flow for Google Calendar.
+
+        Spins up a local loopback HTTP server on a random port, opens the
+        consent URL in the browser, and waits up to ``_auth_timeout`` seconds
+        for Google to redirect back.  The authorization code is captured
+        automatically — no copy-paste required.
+        """
         plan_text = self.query_one("#plan-text", Static)
         _, gcal, _ = get_services()
 
         try:
-            flow, url = await asyncio.to_thread(gcal.get_auth_url)
+            flow, url, done_event, code_box = await asyncio.to_thread(gcal.start_local_auth_server)
             self._oauth_flow = flow
         except Exception as exc:
             plan_text.update(f"[bold red]❌ Failed to start GCal OAuth flow: {exc}[/bold red]")
             return
 
-        def _on_auth_complete(code: str | None = None) -> None:
-            pt = self.query_one("#plan-text", Static)
-            if not code:
-                pt.update("[yellow]OAuth flow cancelled.[/yellow]")
-                return
+        # Show the URL and open it; the user just approves in the browser.
+        from rich.markup import escape as rich_escape
 
-            ok, msg = gcal.complete_auth(self._oauth_flow, code)
-            if ok:
-                pt.update(f"[bold green]✔ OAuth complete: {msg}[/bold green]")
-            else:
-                pt.update(f"[bold red]❌ OAuth exchange failed: {msg}[/bold red]")
+        plan_text.update(
+            "[bold cyan]🔑 Google Calendar OAuth[/bold cyan]\n\n"
+            "Opening browser… if it doesn't open automatically, visit:\n"
+            f"{rich_escape(url)}\n\n"
+            "[dim]Waiting for browser approval (timeout: 2 min)…[/dim]"
+        )
+        webbrowser.open(url)
 
-        self.push_screen(AuthModal(url), callback=_on_auth_complete)
+        # Wait in a background thread so the TUI stays responsive.
+        completed = await asyncio.to_thread(done_event.wait, _auth_timeout)
+
+        if not completed:
+            plan_text.update(
+                "[bold red]❌ OAuth timed out (2 min). Press 🔑 OAuth GCal to try again.[/bold red]"
+            )
+            return
+
+        code = code_box[0]
+        if not code:
+            plan_text.update("[bold red]❌ No authorization code received.[/bold red]")
+            return
+
+        ok, msg = await asyncio.to_thread(gcal.complete_auth, flow, code)
+        if ok:
+            plan_text.update(f"[bold green]✔ {msg}[/bold green]")
+        else:
+            plan_text.update(f"[bold red]❌ OAuth exchange failed: {msg}[/bold red]")
 
     async def action_save_settings(self) -> None:
         """Save selected LLM backend settings to .env file."""
