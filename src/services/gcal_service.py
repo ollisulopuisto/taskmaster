@@ -40,14 +40,17 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 def _anchor(path: str) -> str:
-    """Resolve *path* relative to the project root when it is a bare filename.
+    """Resolve *path* relative to CWD or project root when it is a bare filename.
 
     If *path* is already absolute or contains directory separators it is
-    returned unchanged, so callers that already pass a full path still work.
+    returned unchanged. Otherwise, checks CWD first, then project root.
     """
     p = Path(path)
     if p.is_absolute() or len(p.parts) > 1:
         return str(p)
+    cwd_candidate = Path.cwd() / p
+    if cwd_candidate.exists():
+        return str(cwd_candidate)
     return str(_PROJECT_ROOT / p)
 
 

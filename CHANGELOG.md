@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.08.12.55] - 2026-08-12
+
+### Fixed
+
+- **gcal**: Update `_anchor()` path resolution to check `Path.cwd()` before `_PROJECT_ROOT`, ensuring `credentials.json` is found when running from directories linked or launched across different machines/paths.
+
 ## [v26.08.12.54] - 2026-08-12
 
 ### Changed
