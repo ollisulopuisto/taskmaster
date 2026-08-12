@@ -396,10 +396,10 @@ class TaskMasterApp(App):
             plan_text.update(f"[bold red]❌ Failed to save settings to .env: {exc}[/bold red]")
 
     async def action_discover_llms(self) -> None:
-        """Autodiscover running local LLM servers and update backend dropdown options."""
+        """Autodiscover local and LAN LLM servers and update backend dropdown options."""
         plan_text = self.query_one("#plan-text", Static)
         plan_text.update(
-            "[dim]Probing local ports for active LLM servers (8000, 11434, 1234)...[/dim]"
+            "[dim]Discovering LLMs (mDNS LAN browse + local ports 8000, 11434, 1234)...[/dim]"
         )
 
         backends = await asyncio.to_thread(LLMService.get_available_backends, autodiscover=True)
@@ -417,7 +417,7 @@ class TaskMasterApp(App):
         disc_count = sum(1 for k in backends if k.startswith("auto_"))
         plan_text.update(
             f"[bold green]✔ LLM Discovery complete: Found {len(backends)} backend(s) "
-            f"({disc_count} autodiscovered local model(s)).[/bold green]"
+            f"({disc_count} autodiscovered local/LAN model(s)).[/bold green]"
         )
 
     async def render_plan_table(self) -> None:

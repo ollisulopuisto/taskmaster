@@ -419,3 +419,152 @@ class TestBuildPrompt:
         prompt = LLMService._build_prompt(tasks=[], free_blocks=blocks)
         assert "08:00" in prompt
         assert "14:00" in prompt
+
+
+class TestLanDiscovery:
+    """LAN LLM discovery via mDNS/ZeroConf and subnet scanning."""
+
+    def test_discover_lan_backends_finds_mdns_service(self) -> None:
+        """mDNS browsing finds an Ollama host on the LAN and enumerates its models."""
+        from services import llm_service as mod
+
+        fake_info = MagicMock()
+        fake_info.parsed_addresses.return_value = ["192.168.1.50"]
+        fake_info.port = 11434
+
+        fake_zc = MagicMock()
+        fake_zc.get_service_info.return_value = fake_info
+
+        def fake_browser_init(zc, service_types, handlers):
+            handlers[0](
+                zc,
+                "_ollama._tcp.local.",
+                "ollama-50._ollama._tcp.local.",
+                mod.ServiceStateChange.Added,
+            )
+            return MagicMock()
+
+        def mock_probe(host: str, port: int, timeout: float = 2.0):
+            return ("Ollama", ["qwen2.5:latest"])
+
+        with (
+            patch("services.llm_service.Zeroconf", return_value=fake_zc),
+            patch("services.llm_service.ServiceBrowser", side_effect=fake_browser_init),
+            patch("services.llm_service.time.sleep"),
+            patch.object(LLMService, "_probe_host_models", side_effect=mock_probe),
+        ):
+            discovered = LLMService.discover_lan_backends(use_cache=False, probe_timeout=1.0)
+
+        assert discovered
+        cfg = next(iter(discovered.values()))
+        assert cfg.base_url == "http://192.168.1.50:11434/v1"
+        assert cfg.model == "qwen2.5:latest"
+        assert cfg.key.startswith("auto_lan_192_168_1_50_11434_")
+
+    def test_discover_lan_backends_skips_services_without_llm_api(self) -> None:
+        """mDNS services that do not expose an LLM HTTP API are ignored."""
+        from services import llm_service as mod
+
+        fake_info = MagicMock()
+        fake_info.parsed_addresses.return_value = ["192.168.1.50"]
+        fake_info.port = 8000
+
+        fake_zc = MagicMock()
+        fake_zc.get_service_info.return_value = fake_info
+
+        def fake_browser_init(zc, service_types, handlers):
+            handlers[0](
+                zc, "_http._tcp.local.", "printer._http._tcp.local.", mod.ServiceStateChange.Added
+            )
+            return MagicMock()
+
+        with (
+            patch("services.llm_service.Zeroconf", return_value=fake_zc),
+            patch("services.llm_service.ServiceBrowser", side_effect=fake_browser_init),
+            patch("services.llm_service.time.sleep"),
+            patch.object(LLMService, "_probe_host_models", return_value=None),
+        ):
+            discovered = LLMService.discover_lan_backends(use_cache=False)
+
+        assert discovered == {}
+
+    def test_discover_lan_backends_graceful_when_zeroconf_missing(self) -> None:
+        """Discovery degrades to empty results when the zeroconf library is unavailable."""
+        with (
+            patch("services.llm_service.ServiceBrowser", None),
+            patch("services.llm_service.Zeroconf", None),
+        ):
+            discovered = LLMService.discover_lan_backends(use_cache=False)
+        assert discovered == {}
+
+    def test_scan_lan_ports_finds_openai_compatible_host(self) -> None:
+        """Subnet scan finds an OpenAI-compatible server on an explicitly given host."""
+
+        def fake_connect(host: str, port: int, timeout: float = 0.5) -> bool:
+            return host == "192.168.1.77" and port == 8000
+
+        with (
+            patch.object(LLMService, "_try_connect", side_effect=fake_connect),
+            patch.object(
+                LLMService,
+                "_probe_host_models",
+                return_value=("OpenAI", ["gemma-4-12b-it.gguf"]),
+            ),
+        ):
+            discovered = LLMService.scan_lan_ports(
+                hosts=["192.168.1.77", "192.168.1.78"],
+                ports=[11434, 8000],
+                timeout=0.2,
+                max_workers=4,
+            )
+
+        found = next((c for c in discovered.values() if c.model == "gemma-4-12b-it.gguf"), None)
+        assert found is not None
+        assert found.base_url == "http://192.168.1.77:8000/v1"
+        assert found.key.startswith("auto_lan_192_168_1_77_8000_")
+
+    def test_scan_lan_ports_returns_empty_when_no_hosts_reachable(self) -> None:
+        """Subnet scan returns nothing when no hosts accept TCP connections."""
+
+        def fake_connect(host: str, port: int, timeout: float = 0.5) -> bool:
+            return False
+
+        with patch.object(LLMService, "_try_connect", side_effect=fake_connect):
+            discovered = LLMService.scan_lan_ports(
+                hosts=["192.168.1.99"],
+                ports=[11434, 8000],
+                timeout=0.2,
+                max_workers=4,
+            )
+        assert discovered == {}
+
+    def test_get_available_backends_autodiscover_merges_lan(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """autodiscover=True merges local, mDNS LAN, and env-configured backends."""
+        monkeypatch.setenv("LLM_BACKENDS", "local")
+        monkeypatch.setenv("LLM_BACKEND_LOCAL_NAME", "Local Gemma")
+
+        lan_cfg = LLMBackendConfig(
+            key="auto_lan_192_168_1_50_11434_qwen",
+            name="Ollama (LAN 192.168.1.50:11434): qwen2.5:latest",
+            base_url="http://192.168.1.50:11434/v1",
+            model="qwen2.5:latest",
+        )
+
+        with (
+            patch.object(LLMService, "discover_local_backends", return_value={}),
+            patch.object(
+                LLMService,
+                "discover_lan_backends",
+                return_value={"auto_lan_192_168_1_50_11434_qwen": lan_cfg},
+            ),
+            patch.object(LLMService, "scan_lan_ports", return_value={}),
+        ):
+            backends = LLMService.get_available_backends(autodiscover=True)
+
+        assert "local" in backends
+        assert "auto_lan_192_168_1_50_11434_qwen" in backends
+        assert (
+            backends["auto_lan_192_168_1_50_11434_qwen"].base_url == "http://192.168.1.50:11434/v1"
+        )

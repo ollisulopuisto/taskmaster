@@ -15,6 +15,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import socket
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -25,9 +29,28 @@ from openai import OpenAI
 
 from models.task import LLMBackendConfig, Task, TriagePlan, TriagePlanIDs
 
+try:
+    from zeroconf import ServiceBrowser, ServiceStateChange, Zeroconf
+except ImportError:
+    ServiceBrowser = None  # type: ignore[assignment]
+    ServiceStateChange = None  # type: ignore[assignment]
+    Zeroconf = None  # type: ignore[assignment]
+
+
+# mDNS service types that LLM servers advertise on the LAN.
+LAN_LLM_SERVICE_TYPES = ["_ollama._tcp.local.", "_llm._tcp.local.", "_openai._tcp.local."]
+# Well-known ports probed during the opt-in subnet scan.
+LAN_LLM_PORTS = [11434, 8000, 1234]
+# Results from mDNS browsing are cached to avoid re-probing on every UI action.
+LAN_CACHE_TTL = 120.0
+
 
 class LLMService:
     """Talks to any OpenAI-compatible LLM and returns a structured triage plan."""
+
+    # TTL-guarded cache of mDNS LAN discovery results (see LAN_CACHE_TTL).
+    _lan_cache: dict[str, LLMBackendConfig] = {}
+    _lan_cache_expires: float = 0.0
 
     def __init__(
         self,
@@ -158,13 +181,203 @@ class LLMService:
         return discovered
 
     @classmethod
+    def discover_lan_backends(
+        cls,
+        browse_seconds: float = 2.0,
+        probe_timeout: float = 2.0,
+        use_cache: bool = True,
+    ) -> dict[str, LLMBackendConfig]:
+        """Discover LLM servers on the LAN via mDNS/ZeroConf (Bonjour/avahi).
+
+        Browses the well-known LLM service types (`_ollama._tcp.local.`,
+        `_llm._tcp.local.`, `_openai._tcp.local.`) — servers advertise
+        themselves, no IP scanning needed — then resolves
+        each advertised host:port and probes it for an OpenAI-compatible
+        `/v1/models` or Ollama `/api/tags` endpoint.
+
+        This is passive and fast, so it runs on every autodiscovery. Results are
+        cached for `LAN_CACHE_TTL` seconds unless ``use_cache`` is False.
+        """
+        if ServiceBrowser is None or Zeroconf is None:
+            return {}
+
+        now = time.monotonic()
+        if use_cache and cls._lan_cache and now < cls._lan_cache_expires:
+            return dict(cls._lan_cache)
+
+        found_names: list[tuple[str, str]] = []
+
+        def _on_change(_zc: Any, service_type: str, name: str, state_change: Any) -> None:
+            if state_change == ServiceStateChange.Added:
+                found_names.append((service_type, name))
+
+        discovered: dict[str, LLMBackendConfig] = {}
+        try:
+            zc = Zeroconf()
+            try:
+                ServiceBrowser(zc, LAN_LLM_SERVICE_TYPES, [_on_change])
+                time.sleep(browse_seconds)
+                for service_type, name in found_names:
+                    info = zc.get_service_info(service_type, name)
+                    if not info or not info.port:
+                        continue
+                    addresses = list(info.parsed_addresses() or [])
+                    if not addresses:
+                        continue
+                    host = addresses[0]
+                    probed = cls._probe_host_models(host, info.port, timeout=probe_timeout)
+                    if not probed:
+                        continue
+                    label, model_ids = probed
+                    for model_id in model_ids:
+                        cfg = cls._make_lan_config(host, info.port, model_id, label)
+                        if cfg.key not in discovered:
+                            discovered[cfg.key] = cfg
+            finally:
+                zc.close()
+        except Exception:
+            pass  # Discovery is best-effort; never crash the app over it.
+
+        cls._lan_cache = discovered
+        cls._lan_cache_expires = now + LAN_CACHE_TTL
+        return dict(discovered)
+
+    @staticmethod
+    def _try_connect(host: str, port: int, timeout: float) -> bool:
+        """True if `host:port` accepts a TCP connection within `timeout`."""
+        try:
+            with socket.create_connection((host, port), timeout=timeout):
+                return True
+        except OSError:
+            return False
+
+    @staticmethod
+    def _guess_local_ip() -> str:
+        """Determine the machine's primary LAN IPv4 without sending packets."""
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.connect(("8.8.8.8", 80))
+                return sock.getsockname()[0]
+        except OSError:
+            return "127.0.0.1"
+
+    @classmethod
+    def _guess_lan_hosts(cls) -> list[str]:
+        """All /24 neighbours of this machine (hosts .1-.254)."""
+        local_ip = cls._guess_local_ip()
+        if local_ip.startswith("127."):
+            return ["127.0.0.1"]
+        prefix = ".".join(local_ip.split(".")[:3])
+        return [f"{prefix}.{i}" for i in range(1, 255)]
+
+    @classmethod
+    def scan_lan_ports(
+        cls,
+        ports: list[int] | None = None,
+        hosts: list[str] | None = None,
+        timeout: float = 0.5,
+        max_workers: int = 64,
+    ) -> dict[str, LLMBackendConfig]:
+        """Probe hosts on the LAN for LLM servers on well-known ports.
+
+        Uses parallel short-timeout TCP connects, then HTTP-verifies anything
+        that answers. Slower and noisier than mDNS — the caller decides when to
+        run it (default: opt-in via ``LLM_LAN_SCAN=1`` or explicit hosts).
+        """
+        discovered: dict[str, LLMBackendConfig] = {}
+        targets = hosts or cls._guess_lan_hosts()
+        ports = ports or LAN_LLM_PORTS
+
+        pairs = [(host, port) for host in targets for port in ports]
+        if not pairs:
+            return discovered
+
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {
+                pool.submit(cls._try_connect, host, port, timeout): (host, port)
+                for host, port in pairs
+            }
+            for future in as_completed(futures):
+                host, port = futures[future]
+                if not future.result():
+                    continue
+                probed = cls._probe_host_models(host, port, timeout=max(1.0, timeout * 4))
+                if not probed:
+                    continue
+                label, model_ids = probed
+                for model_id in model_ids:
+                    cfg = cls._make_lan_config(host, port, model_id, label)
+                    if cfg.key not in discovered:
+                        discovered[cfg.key] = cfg
+
+        return discovered
+
+    @classmethod
+    def _probe_host_models(
+        cls, host: str, port: int, timeout: float = 2.0
+    ) -> tuple[str, list[str]] | None:
+        """Probe one host:port for an LLM HTTP API.
+
+        Returns ``(kind, [model_ids])`` for an OpenAI-compatible ``/v1/models``
+        or an Ollama ``/api/tags`` endpoint, or None if neither answers.
+        """
+        base = f"http://{host}:{port}"
+        client = httpx.Client(timeout=timeout)
+        try:
+            res = client.get(f"{base}/v1/models")
+            if res.status_code == 200:
+                models = [
+                    item.get("id")
+                    for item in res.json().get("data", [])
+                    if isinstance(item, dict) and item.get("id")
+                ]
+                if models:
+                    return "OpenAI-compatible", models
+
+            res = client.get(f"{base}/api/tags")
+            if res.status_code == 200:
+                models = [
+                    item.get("name")
+                    for item in res.json().get("models", [])
+                    if isinstance(item, dict) and item.get("name")
+                ]
+                if models:
+                    return "Ollama", models
+        except (httpx.HTTPError, ValueError, KeyError):
+            return None
+        finally:
+            client.close()
+        return None
+
+    @classmethod
+    def _make_lan_config(cls, host: str, port: int, model_id: str, label: str) -> LLMBackendConfig:
+        """Build an LLMBackendConfig named after its LAN host:port."""
+        clean_host = re.sub(r"[^A-Za-z0-9_-]", "_", host.rstrip("."))
+        clean_model = model_id.replace(":", "_").replace("/", "_")
+        key = f"auto_lan_{clean_host}_{port}_{clean_model}"
+        name = f"⚡ {label} (LAN {host}:{port}): {model_id}"
+        return LLMBackendConfig(
+            key=key,
+            name=name,
+            base_url=f"http://{host}:{port}/v1",
+            model=model_id,
+            api_key="ollama",
+        )
+
+    @classmethod
     def get_available_backends(cls, autodiscover: bool = False) -> dict[str, LLMBackendConfig]:
         """Discover available LLM backends defined in environment variables.
 
         Supports multi-backend configuration via LLM_BACKENDS (comma-separated list of keys,
         e.g. `local, gemini`) with per-backend settings `LLM_BACKEND_<KEY>_*`.
 
-        If `autodiscover` is True, also probes running local servers (Ollama, llama-server, etc.).
+        If `autodiscover` is True, also probes running local servers (Ollama,
+        llama-server, etc.) and browses the LAN via mDNS/ZeroConf for LLM hosts
+        on other devices.
+
+        The heavyweight /24 subnet scan is opt-in: enable it with the
+        `LLM_LAN_SCAN` env var (`1`/`true`/`yes`) and optionally restrict it to
+        specific hosts with `LLM_LAN_HOSTS` (comma-separated IPs or hostnames).
 
         Falls back to reading single LLM_* or OLLAMA_* variables if LLM_BACKENDS is not defined.
         """
@@ -211,6 +424,12 @@ class LLMService:
         if autodiscover:
             discovered = cls.discover_local_backends()
             backends.update(discovered)
+            backends.update(cls.discover_lan_backends())
+            if os.getenv("LLM_LAN_SCAN", "0").strip().lower() in ("1", "true", "yes"):
+                static_hosts = [
+                    h.strip() for h in os.getenv("LLM_LAN_HOSTS", "").split(",") if h.strip()
+                ]
+                backends.update(cls.scan_lan_ports(hosts=static_hosts or None))
 
         return backends
 
