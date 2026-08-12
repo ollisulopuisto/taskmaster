@@ -71,6 +71,7 @@ class TaskMasterApp(App):
     BINDINGS = [
         ("g", "generate_plan", "⚡ Generate Plan"),
         ("s", "sync_plan", "💾 Confirm & Sync"),
+        ("v", "save_settings", "💾 Save Settings"),
         ("q", "quit", "Quit"),
     ]
 
@@ -165,6 +166,12 @@ class TaskMasterApp(App):
                         classes="action-btn",
                     )
                     yield Button(
+                        "💾 Save Settings (V)",
+                        id="btn-save-settings",
+                        variant="default",
+                        classes="action-btn",
+                    )
+                    yield Button(
                         "⚡ Generate Plan (G)",
                         id="btn-generate-plan",
                         variant="primary",
@@ -224,6 +231,8 @@ class TaskMasterApp(App):
                 await self.render_plan_table()
         elif button_id == "btn-discover-llm":
             await self.action_discover_llms()
+        elif button_id == "btn-save-settings":
+            await self.action_save_settings()
         elif button_id == "btn-generate-plan":
             await self.action_generate_plan()
         elif button_id == "btn-sync-plan":
@@ -232,6 +241,31 @@ class TaskMasterApp(App):
             await self.action_submit_debrief()
         elif button_id == "btn-fetch-debug":
             await self.action_fetch_debug()
+
+    async def action_save_settings(self) -> None:
+        """Save selected LLM backend settings to .env file."""
+        plan_text = self.query_one("#plan-text", Static)
+        backend_select = self.query_one("#select-llm-backend", Select)
+        selected_backend = str(backend_select.value) if backend_select.value else None
+
+        if not selected_backend:
+            plan_text.update("[yellow]No LLM backend selected to save.[/yellow]")
+            return
+
+        backends = await asyncio.to_thread(LLMService.get_available_backends, autodiscover=True)
+        config = backends.get(selected_backend)
+
+        try:
+            await asyncio.to_thread(
+                LLMService.save_settings_to_env, selected_backend, config=config
+            )
+            plan_text.update(
+                "[bold green]✔ Saved settings to .env "
+                f"(Default LLM: {selected_backend})[/bold green]"
+            )
+
+        except Exception as exc:
+            plan_text.update(f"[bold red]❌ Failed to save settings to .env: {exc}[/bold red]")
 
     async def action_discover_llms(self) -> None:
         """Autodiscover running local LLM servers and update backend dropdown options."""

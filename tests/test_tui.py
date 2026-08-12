@@ -237,3 +237,17 @@ async def test_tui_generate_plan_handles_gcal_todoist_error(mock_services):
 
         plan_text = app.query_one("#plan-text", Static)
         assert "Error" in str(plan_text.content) or "GCal Auth Failed" in str(plan_text.content)
+
+
+@pytest.mark.anyio
+async def test_tui_save_settings_button(mock_services):
+    """Clicking Save Settings button invokes LLMService.save_settings_to_env."""
+    with patch("tui.LLMService.save_settings_to_env") as mock_save:
+        app = TaskMasterApp()
+        async with app.run_test() as pilot:
+            await pilot.click("#btn-save-settings")
+            await pilot.pause()
+
+            mock_save.assert_called_once()
+            plan_text = app.query_one("#plan-text", Static)
+            assert "Saved settings" in str(plan_text.content)

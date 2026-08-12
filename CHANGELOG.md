@@ -5,7 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.08.12.48] - 2026-08-12
+
+### Added
+
+- **services**: Add `LLMService.save_settings_to_env()` to persist default LLM backend selection and autodiscovered backend definitions into `.env`.
+- **tui**: Add "💾 Save Settings (V)" action button and key binding (`v`) to Textual TUI top bar to persist selected LLM configurations to `.env`.
+
 ## [v26.08.12.47] - 2026-08-12
+
 
 ### Added
 

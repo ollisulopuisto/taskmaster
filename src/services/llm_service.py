@@ -242,6 +242,82 @@ class LLMService:
         )
 
     @classmethod
+    def save_settings_to_env(
+        cls,
+        backend_key: str,
+        config: LLMBackendConfig | None = None,
+        env_path: str = ".env",
+    ) -> None:
+        """Save selected default LLM backend and any autodiscovered backend details to .env."""
+        path = Path(env_path)
+        lines: list[str] = []
+        if path.exists():
+            lines = path.read_text(encoding="utf-8").splitlines()
+
+        updates: dict[str, str] = {
+            "LLM_DEFAULT_BACKEND": backend_key,
+        }
+
+        # If backend config is provided or key is auto-discovered, update backend definitions
+        if config or backend_key.startswith("auto_"):
+            cfg = config
+            if cfg is None:
+                available = cls.get_available_backends(autodiscover=True)
+                cfg = available.get(backend_key)
+
+            if cfg:
+                key_upper = backend_key.upper()
+                updates[f"LLM_BACKEND_{key_upper}_NAME"] = (
+                    f'"{cfg.name}"' if not cfg.name.startswith('"') else cfg.name
+                )
+                updates[f"LLM_BACKEND_{key_upper}_BASE_URL"] = cfg.base_url
+                updates[f"LLM_BACKEND_{key_upper}_MODEL"] = cfg.model
+                updates[f"LLM_BACKEND_{key_upper}_API_KEY"] = cfg.api_key
+                updates[f"LLM_BACKEND_{key_upper}_TIMEOUT"] = str(cfg.timeout)
+
+                # Ensure backend_key is listed in LLM_BACKENDS
+                current_backends: list[str] = []
+                for line in lines:
+                    if line.strip().startswith("LLM_BACKENDS="):
+                        val = line.split("=", 1)[1].strip()
+                        current_backends = [k.strip() for k in val.split(",") if k.strip()]
+                        break
+
+                if not current_backends and os.getenv("LLM_BACKENDS"):
+                    current_backends = [
+                        k.strip() for k in os.getenv("LLM_BACKENDS", "").split(",") if k.strip()
+                    ]
+
+                if backend_key not in current_backends:
+                    current_backends.append(backend_key)
+                    updates["LLM_BACKENDS"] = ",".join(current_backends)
+
+        # Apply all updates to existing lines or append new ones
+        updated_keys: set[str] = set()
+        new_lines: list[str] = []
+        for line in lines:
+            stripped = line.strip()
+            matched_key = None
+            for k in updates:
+                if stripped.startswith(f"{k}=") or stripped.startswith(f"{k} ="):
+                    matched_key = k
+                    break
+
+            if matched_key:
+                new_lines.append(f"{matched_key}={updates[matched_key]}")
+                updated_keys.add(matched_key)
+                os.environ[matched_key] = updates[matched_key].strip('"')
+            else:
+                new_lines.append(line)
+
+        for k, v in updates.items():
+            if k not in updated_keys:
+                new_lines.append(f"{k}={v}")
+                os.environ[k] = v.strip('"')
+
+        path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+    @classmethod
     def _compute_input_hash(
         cls, tasks: list[Task], free_blocks: list[Any], reference_date: date | None = None
     ) -> str:

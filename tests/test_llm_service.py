@@ -352,6 +352,38 @@ class TestLLMService:
             assert ok is False
             assert "unreachable" in msg.lower() or "connection refused" in msg.lower()
 
+    def test_save_settings_to_env_updates_default_backend(self, tmp_path) -> None:
+        env_file = tmp_path / ".env"
+        env_file.write_text("LLM_BACKENDS=local,gemini\nLLM_DEFAULT_BACKEND=local\n")
+
+        LLMService.save_settings_to_env(backend_key="gemini", env_path=str(env_file))
+
+        content = env_file.read_text()
+        assert "LLM_DEFAULT_BACKEND=gemini" in content
+        assert "LLM_DEFAULT_BACKEND=local" not in content
+
+    def test_save_settings_to_env_saves_autodiscovered_backend(self, tmp_path) -> None:
+        env_file = tmp_path / ".env"
+        env_file.write_text("LLM_BACKENDS=local,gemini\nLLM_DEFAULT_BACKEND=local\n")
+
+        cfg = LLMBackendConfig(
+            key="auto_11434_llama3",
+            name="⚡ Discovered Ollama (Port 11434): llama3",
+            base_url="http://localhost:11434/v1",
+            model="llama3",
+            api_key="ollama",
+        )
+
+        LLMService.save_settings_to_env(
+            backend_key="auto_11434_llama3", config=cfg, env_path=str(env_file)
+        )
+
+        content = env_file.read_text()
+        assert "LLM_DEFAULT_BACKEND=auto_11434_llama3" in content
+        assert "auto_11434_llama3" in content
+        assert "LLM_BACKEND_AUTO_11434_LLAMA3_MODEL=llama3" in content
+        assert "LLM_BACKEND_AUTO_11434_LLAMA3_BASE_URL=http://localhost:11434/v1" in content
+
 
 class TestBuildPrompt:
     """Direct tests for the `_build_prompt` static helper."""
