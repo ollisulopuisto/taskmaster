@@ -6,6 +6,7 @@ from datetime import UTC, date, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
+from google.auth.exceptions import RefreshError
 
 from models.task import TimeBlock
 from services.gcal_service import GCalService
@@ -334,3 +335,37 @@ class TestGCalAuth:
         assert dt is not None
         assert dt.tzinfo is not None
         assert dt.year == 2026 and dt.month == 7 and dt.day == 22
+
+    def test_expired_token_refresh_error_removes_token_and_triggers_consent_flow(
+        self, tmp_path
+    ) -> None:
+        credentials_path = tmp_path / "credentials.json"
+        credentials_path.write_text("{}")
+        token_path = tmp_path / "token.json"
+        token_path.write_text(self.VALID_TOKEN_JSON)
+
+        fake_creds = MagicMock()
+        fake_creds.expired = True
+        fake_creds.refresh_token = "1//fake"
+        fake_creds.valid = False
+        fake_creds.refresh.side_effect = RefreshError("invalid_grant: Bad Request")
+
+        new_creds = MagicMock()
+        new_creds.to_json.return_value = self.VALID_TOKEN_JSON
+
+        with (
+            patch("services.gcal_service.build"),
+            patch(
+                "services.gcal_service.Credentials.from_authorized_user_file",
+                return_value=fake_creds,
+            ),
+            patch("services.gcal_service.InstalledAppFlow") as MockFlow,
+        ):
+            MockFlow.from_client_secrets_file.return_value.run_local_server.return_value = new_creds
+            GCalService(
+                credentials_path=str(credentials_path),
+                token_path=str(token_path),
+            )
+
+        assert not token_path.exists() or token_path.read_text() == self.VALID_TOKEN_JSON
+        MockFlow.from_client_secrets_file.assert_called_once()

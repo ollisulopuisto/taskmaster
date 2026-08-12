@@ -21,6 +21,7 @@ import os
 from datetime import UTC, date, datetime
 from typing import Any
 
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -53,15 +54,23 @@ class GCalService:
             return creds
 
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-            self._save_token(creds)
-            return creds
+            try:
+                creds.refresh(Request())
+                self._save_token(creds)
+                return creds
+            except RefreshError:
+                if os.path.exists(self._token_path):
+                    os.remove(self._token_path)
 
         return self._run_consent_flow()
 
     def _load_existing_token(self) -> Credentials | None:
         if os.path.exists(self._token_path):
-            return Credentials.from_authorized_user_file(self._token_path, SCOPES)
+            try:
+                return Credentials.from_authorized_user_file(self._token_path, SCOPES)
+            except Exception:
+                if os.path.exists(self._token_path):
+                    os.remove(self._token_path)
         return None
 
     def _run_consent_flow(self) -> Credentials:

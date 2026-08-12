@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.08.12.44] - 2026-08-12
+
+### Fixed
+
+- **gcal**: Catch `RefreshError` and token loading errors in `GCalService._load_credentials()` to purge invalid or expired `token.json` files and re-trigger consent flow automatically.
+
 ## [v26.08.12.43] - 2026-08-12
 
 ### Changed
