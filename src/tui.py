@@ -400,7 +400,16 @@ class TaskMasterApp(App):
 
         plan_text.update("[dim]Running API credential & server pre-checks...[/dim]")
 
-        # 1. Pre-check selected LLM backend
+        # 1. Pre-check Google Calendar OAuth credentials statically
+        credentials_path = os.getenv("GOOGLE_CREDENTIALS_PATH", "credentials.json")
+        gc_ok, gc_msg = await asyncio.to_thread(
+            GCalService.validate_credentials_static, credentials_path=credentials_path
+        )
+        if not gc_ok:
+            plan_text.update(f"[bold red]❌ Google Calendar Pre-check Failed: {gc_msg}[/bold red]")
+            return
+
+        # 2. Pre-check selected LLM backend
         backends = LLMService.get_available_backends()
         target_cfg = None
         if isinstance(backends, dict) and backends:
@@ -414,16 +423,10 @@ class TaskMasterApp(App):
 
         todoist, gcal, llm = get_services(backend_key=selected_backend)
 
-        # 2. Pre-check Todoist API token
+        # 3. Pre-check Todoist API token
         td_ok, td_msg = await asyncio.to_thread(todoist.validate_credentials)
         if not td_ok:
             plan_text.update(f"[bold red]❌ Todoist Pre-check Failed: {td_msg}[/bold red]")
-            return
-
-        # 3. Pre-check Google Calendar OAuth token state
-        gc_ok, gc_msg = await asyncio.to_thread(gcal.validate_credentials)
-        if not gc_ok:
-            plan_text.update(f"[bold red]❌ Google Calendar Pre-check Failed: {gc_msg}[/bold red]")
             return
 
         plan_text.update("[dim]Ingesting Todoist tasks & Google Calendar schedule...[/dim]")
@@ -537,17 +540,20 @@ class TaskMasterApp(App):
         backend_select = self.query_one("#select-llm-backend", Select)
         selected_backend = str(backend_select.value) if backend_select.value else None
 
+        # Pre-check credentials statically before instantiating services to prevent OAuth flow hangs
+        credentials_path = os.getenv("GOOGLE_CREDENTIALS_PATH", "credentials.json")
+        gc_ok, gc_msg = await asyncio.to_thread(
+            GCalService.validate_credentials_static, credentials_path=credentials_path
+        )
+        if not gc_ok:
+            debug_text.update(f"[bold red]❌ Google Calendar Pre-check Failed: {gc_msg}[/bold red]")
+            return
+
         todoist, gcal, llm = get_services(backend_key=selected_backend)
 
-        # Pre-check credentials before calling service methods to prevent OAuth flow hangs
         td_ok, td_msg = await asyncio.to_thread(todoist.validate_credentials)
         if not td_ok:
             debug_text.update(f"[bold red]❌ Todoist Pre-check Failed: {td_msg}[/bold red]")
-            return
-
-        gc_ok, gc_msg = await asyncio.to_thread(gcal.validate_credentials)
-        if not gc_ok:
-            debug_text.update(f"[bold red]❌ Google Calendar Pre-check Failed: {gc_msg}[/bold red]")
             return
 
         debug_text.update("[dim]Fetching raw service data...[/dim]")

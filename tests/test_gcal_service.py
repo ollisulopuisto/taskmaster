@@ -256,10 +256,11 @@ class TestGCalAuth:
         token_path.write_text(self.VALID_TOKEN_JSON)
 
         with patch("services.gcal_service.build") as mock_build:
-            GCalService(
+            svc = GCalService(
                 credentials_path=str(tmp_path / "missing.json"),
                 token_path=str(token_path),
             )
+            _ = svc.service
 
         mock_build.assert_called_once()
         # build() must be invoked with resolved credentials
@@ -282,10 +283,11 @@ class TestGCalAuth:
             MockFlow.from_client_secrets_file.return_value.run_local_server.return_value = (
                 fake_creds
             )
-            GCalService(
+            svc = GCalService(
                 credentials_path=str(credentials_path),
                 token_path=str(tmp_path / "token.json"),
             )
+            _ = svc.service
 
         MockFlow.from_client_secrets_file.assert_called_once_with(
             str(credentials_path),
@@ -314,10 +316,11 @@ class TestGCalAuth:
             MockFlow.from_client_secrets_file.return_value.run_local_server.return_value = (
                 fake_creds
             )
-            GCalService(
+            svc = GCalService(
                 credentials_path=str(credentials_path),
                 token_path=str(token_path),
             )
+            _ = svc.service
 
         assert token_path.exists()
         assert token_path.read_text() == self.VALID_TOKEN_JSON
@@ -325,10 +328,11 @@ class TestGCalAuth:
     def test_missing_credentials_file_raises(self, tmp_path) -> None:
         with patch("services.gcal_service.build"), patch("os.path.exists", return_value=False):
             with pytest.raises(FileNotFoundError):
-                GCalService(
+                svc = GCalService(
                     credentials_path=str(tmp_path / "nope.json"),
                     token_path=str(tmp_path / "token.json"),
                 )
+                _ = svc.service
 
     def test_parse_dt_handles_naive_date_strings(self) -> None:
         dt = GCalService._parse_dt("2026-07-22")
@@ -362,10 +366,11 @@ class TestGCalAuth:
             patch("services.gcal_service.InstalledAppFlow") as MockFlow,
         ):
             MockFlow.from_client_secrets_file.return_value.run_local_server.return_value = new_creds
-            GCalService(
+            svc = GCalService(
                 credentials_path=str(credentials_path),
                 token_path=str(token_path),
             )
+            _ = svc.service
 
         assert not token_path.exists() or token_path.read_text() == self.VALID_TOKEN_JSON
         MockFlow.from_client_secrets_file.assert_called_once()

@@ -199,6 +199,7 @@ class TestLLMService:
     def test_from_env_reads_gemini_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """LLMService.from_env() prioritizes LLM_BASE_URL, LLM_MODEL, and LLM_API_KEY."""
         monkeypatch.delenv("LLM_BACKENDS", raising=False)
+        monkeypatch.delenv("LLM_DEFAULT_BACKEND", raising=False)
         monkeypatch.setenv(
             "LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/"
         )
@@ -211,6 +212,7 @@ class TestLLMService:
     def test_from_env_falls_back_to_ollama_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """LLMService.from_env() falls back to OLLAMA_* when LLM_* are unset."""
         monkeypatch.delenv("LLM_BACKENDS", raising=False)
+        monkeypatch.delenv("LLM_DEFAULT_BACKEND", raising=False)
         monkeypatch.delenv("LLM_BASE_URL", raising=False)
         monkeypatch.delenv("LLM_MODEL", raising=False)
         monkeypatch.delenv("LLM_API_KEY", raising=False)

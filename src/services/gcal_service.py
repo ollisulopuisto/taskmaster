@@ -45,7 +45,23 @@ class GCalService:
         self._calendar_ids = calendar_ids or ["primary"]
         self._credentials_path = credentials_path
         self._token_path = token_path
-        self._service = build("calendar", "v3", credentials=self._load_credentials())
+        self._service_instance: Any = None
+
+    @property
+    def service(self) -> Any:
+        """Lazily initialize Google Calendar service on first access."""
+        if self._service_instance is None:
+            self._service_instance = build("calendar", "v3", credentials=self._load_credentials())
+        return self._service_instance
+
+    @property
+    def _service(self) -> Any:
+        """Backwards compatible property for _service access."""
+        return self.service
+
+    @_service.setter
+    def _service(self, value: Any) -> None:
+        self._service_instance = value
 
     @classmethod
     def validate_credentials_static(
@@ -139,11 +155,11 @@ class GCalService:
     def _safe_execute(self, request_factory: Any) -> Any:
         """Execute a GCal API request with automatic reconnect on broken pipes."""
         try:
-            return request_factory(self._service).execute()
+            return request_factory(self.service).execute()
         except (BrokenPipeError, ConnectionResetError, OSError):
             # Connection died while idle — rebuild service with fresh socket
-            self._service = build("calendar", "v3", credentials=self._load_credentials())
-            return request_factory(self._service).execute()
+            self._service_instance = build("calendar", "v3", credentials=self._load_credentials())
+            return request_factory(self.service).execute()
 
     def get_todays_events(self, *, today: date | None = None) -> list[dict[str, Any]]:
         """Return non-cancelled events occurring on `today` across all calendars."""

@@ -43,6 +43,7 @@ def mock_services():
         mock_gcal.get_free_time_blocks.return_value = mock_blocks
         mock_gcal.validate_credentials.return_value = (True, "Valid")
         mock_gcal_cls.return_value = mock_gcal
+        mock_gcal_cls.validate_credentials_static.return_value = (True, "Valid")
 
         mock_llm = MagicMock()
         mock_llm.plan_triage.return_value = mock_plan
@@ -272,20 +273,22 @@ async def test_tui_generate_plan_handles_timeout(mock_services):
 @pytest.mark.anyio
 async def test_tui_fetch_debug_handles_gcal_error(mock_services):
     """If GCal pre-check fails in debug tab, TUI displays error instead of hanging."""
-    mock_services["gcal"].validate_credentials.return_value = (False, "OAuth token missing")
-    app = TaskMasterApp()
-    async with app.run_test() as pilot:
-        tabs = app.query_one(TabbedContent)
-        tabs.active = "tab-debug"
-        await pilot.pause()
+    with patch(
+        "tui.GCalService.validate_credentials_static", return_value=(False, "OAuth token missing")
+    ):
+        app = TaskMasterApp()
+        async with app.run_test() as pilot:
+            tabs = app.query_one(TabbedContent)
+            tabs.active = "tab-debug"
+            await pilot.pause()
 
-        await pilot.click("#btn-fetch-debug")
-        await pilot.pause()
+            await pilot.click("#btn-fetch-debug")
+            await pilot.pause()
 
-        debug_text = app.query_one("#debug-text", Static)
-        assert "OAuth token missing" in str(debug_text.content) or "Failed" in str(
-            debug_text.content
-        )
+            debug_text = app.query_one("#debug-text", Static)
+            assert "OAuth token missing" in str(debug_text.content) or "Failed" in str(
+                debug_text.content
+            )
 
 
 @pytest.mark.anyio

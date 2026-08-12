@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.08.12.51] - 2026-08-12
+
+### Fixed
+
+- **gcal**: Make `GCalService._service` initialization lazy so instantiating `GCalService` never triggers blocking OAuth consent flow (`flow.run_local_server()`) during `__init__`.
+- **tui**: Perform static GCal credential pre-checks in `action_generate_plan()` and `action_fetch_debug()` prior to service instantiation, preventing terminal raw mode freezes on missing/expired credentials.
+- **tests**: Fix `test_from_env_reads_gemini_vars` and `test_from_env_falls_back_to_ollama_vars` by clearing `LLM_DEFAULT_BACKEND` in environment monkeypatch.
+
 ## [v26.08.12.50] - 2026-08-12
 
 ### Fixed
