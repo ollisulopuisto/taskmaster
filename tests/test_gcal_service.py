@@ -369,3 +369,25 @@ class TestGCalAuth:
 
         assert not token_path.exists() or token_path.read_text() == self.VALID_TOKEN_JSON
         MockFlow.from_client_secrets_file.assert_called_once()
+
+    def test_validate_credentials_valid(self, tmp_path) -> None:
+        token_path = tmp_path / "token.json"
+        token_path.write_text(self.VALID_TOKEN_JSON)
+
+        with patch("services.gcal_service.build"):
+            svc = GCalService(
+                credentials_path=str(tmp_path / "missing.json"),
+                token_path=str(token_path),
+            )
+            ok, msg = svc.validate_credentials()
+            assert ok is True
+            assert "valid" in msg.lower()
+
+    def test_validate_credentials_missing_secrets(self, tmp_path) -> None:
+        with patch("os.path.exists", return_value=False):
+            ok, msg = GCalService.validate_credentials_static(
+                credentials_path=str(tmp_path / "nope.json"),
+                token_path=str(tmp_path / "token.json"),
+            )
+            assert ok is False
+            assert "missing" in msg.lower()

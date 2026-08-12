@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.08.12.47] - 2026-08-12
+
+### Added
+
+- **services**: Add lightweight API pre-check methods (`TodoistService.validate_credentials()`, `GCalService.validate_credentials()`, `LLMService.validate_backend()`) to verify tokens, OAuth state, and backend reachability prior to running triage plans.
+- **tui**: Integrate service pre-checks into `action_generate_plan()` to halt execution early with explicit failure messages if any token or server is invalid/unreachable.
+
 ## [v26.08.12.46] - 2026-08-12
 
 ### Fixed

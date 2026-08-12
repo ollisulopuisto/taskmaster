@@ -47,6 +47,48 @@ class GCalService:
         self._token_path = token_path
         self._service = build("calendar", "v3", credentials=self._load_credentials())
 
+    @classmethod
+    def validate_credentials_static(
+        cls,
+        credentials_path: str = "credentials.json",
+        token_path: str = _TOKEN_PATH,
+    ) -> tuple[bool, str]:
+        """Pre-check Google Calendar OAuth credential & token state without blocking."""
+        if os.path.exists(token_path):
+            try:
+                creds = Credentials.from_authorized_user_file(token_path, SCOPES)
+                if creds and creds.valid:
+                    return True, "Google Calendar OAuth token is valid."
+                if creds and creds.expired and creds.refresh_token:
+                    try:
+                        creds.refresh(Request())
+                        with open(token_path, "w") as fh:
+                            fh.write(creds.to_json())
+                        return True, "Google Calendar OAuth token refreshed."
+                    except RefreshError:
+                        return (
+                            False,
+                            "Google Calendar OAuth token expired and refresh failed. "
+                            "Re-authentication required.",
+                        )
+            except Exception as exc:
+                return False, f"Invalid token file: {exc}"
+
+        if not os.path.exists(credentials_path):
+            return False, f"Google Calendar client secrets file missing at {credentials_path!r}."
+
+        return (
+            False,
+            "Google Calendar authentication required (token missing). Run OAuth consent flow.",
+        )
+
+    def validate_credentials(self) -> tuple[bool, str]:
+        """Instance wrapper for static credential check."""
+        return self.validate_credentials_static(
+            credentials_path=self._credentials_path,
+            token_path=self._token_path,
+        )
+
     def _load_credentials(self) -> Credentials:
         """Resolve OAuth credentials from disk or the consent flow."""
         creds = self._load_existing_token()

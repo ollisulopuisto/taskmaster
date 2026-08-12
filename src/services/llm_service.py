@@ -51,6 +51,49 @@ class LLMService:
             self._cache_dir.mkdir(parents=True, exist_ok=True)
 
     @classmethod
+    def validate_backend(cls, config: LLMBackendConfig) -> tuple[bool, str]:
+        """Fast pre-check to verify LLM backend reachability and API key validity."""
+        if not config.base_url or not config.base_url.startswith("http"):
+            return (
+                False,
+                f"LLM backend '{config.name}' has an invalid base URL: {config.base_url!r}",
+            )
+
+        headers = {}
+        if config.api_key and config.api_key.lower() not in ("ollama", "none", ""):
+            headers["Authorization"] = f"Bearer {config.api_key}"
+
+        client = httpx.Client(timeout=3.0)
+        try:
+            models_url = f"{config.base_url.rstrip('/')}/models"
+            res = client.get(models_url, headers=headers)
+            if res.status_code == 200:
+                return True, f"LLM backend '{config.name}' connected (HTTP 200)."
+            if res.status_code in (401, 403):
+                return (
+                    False,
+                    f"LLM backend '{config.name}' API key rejected (HTTP {res.status_code}). "
+                    "Check API key in .env.",
+                )
+
+            root_url = config.base_url.rsplit("/v1", 1)[0]
+            tags_res = client.get(f"{root_url}/api/tags")
+            if tags_res.status_code == 200:
+                return True, f"LLM backend '{config.name}' connected via Ollama API."
+
+            return (
+                False,
+                f"LLM backend '{config.name}' returned HTTP {res.status_code}.",
+            )
+        except Exception as exc:
+            return (
+                False,
+                f"LLM backend '{config.name}' unreachable at {config.base_url}: {exc}",
+            )
+        finally:
+            client.close()
+
+    @classmethod
     def discover_local_backends(
         cls, target_ports: list[int] | None = None
     ) -> dict[str, LLMBackendConfig]:

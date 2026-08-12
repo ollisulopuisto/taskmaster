@@ -35,17 +35,20 @@ def mock_services():
     ):
         mock_todoist = MagicMock()
         mock_todoist.get_todays_tasks.return_value = mock_tasks
+        mock_todoist.validate_credentials.return_value = (True, "Valid")
         mock_todoist_cls.return_value = mock_todoist
 
         mock_gcal = MagicMock()
         mock_gcal.get_todays_events.return_value = mock_events
         mock_gcal.get_free_time_blocks.return_value = mock_blocks
+        mock_gcal.validate_credentials.return_value = (True, "Valid")
         mock_gcal_cls.return_value = mock_gcal
 
         mock_llm = MagicMock()
         mock_llm.plan_triage.return_value = mock_plan
         mock_llm_cls.return_value = mock_llm
         mock_llm_cls.from_env.return_value = mock_llm
+        mock_llm_cls.validate_backend.return_value = (True, "Valid")
 
         yield {
             "todoist": mock_todoist,

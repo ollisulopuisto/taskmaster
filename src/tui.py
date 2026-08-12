@@ -360,11 +360,37 @@ class TaskMasterApp(App):
         selected_backend = str(backend_select.value) if backend_select.value else None
         self.last_selected_backend = selected_backend
 
-        sched_text.update("[dim]Fetching Todoist & Google Calendar data...[/dim]")
+        plan_text.update("[dim]Running API credential & server pre-checks...[/dim]")
+
+        # 1. Pre-check selected LLM backend
+        backends = LLMService.get_available_backends()
+        target_cfg = None
+        if isinstance(backends, dict) and backends:
+            target_cfg = backends.get(selected_backend or "") or next(iter(backends.values()), None)
+
+        if target_cfg:
+            llm_ok, llm_msg = await asyncio.to_thread(LLMService.validate_backend, target_cfg)
+            if not llm_ok:
+                plan_text.update(f"[bold red]❌ LLM Pre-check Failed: {llm_msg}[/bold red]")
+                return
+
+        todoist, gcal, llm = get_services(backend_key=selected_backend)
+
+        # 2. Pre-check Todoist API token
+        td_ok, td_msg = await asyncio.to_thread(todoist.validate_credentials)
+        if not td_ok:
+            plan_text.update(f"[bold red]❌ Todoist Pre-check Failed: {td_msg}[/bold red]")
+            return
+
+        # 3. Pre-check Google Calendar OAuth token state
+        gc_ok, gc_msg = await asyncio.to_thread(gcal.validate_credentials)
+        if not gc_ok:
+            plan_text.update(f"[bold red]❌ Google Calendar Pre-check Failed: {gc_msg}[/bold red]")
+            return
+
         plan_text.update("[dim]Ingesting Todoist tasks & Google Calendar schedule...[/dim]")
 
         try:
-            todoist, gcal, llm = get_services(backend_key=selected_backend)
             tasks = await asyncio.to_thread(todoist.get_todays_tasks)
             events = await asyncio.to_thread(gcal.get_todays_events)
 

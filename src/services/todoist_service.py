@@ -34,6 +34,18 @@ class TodoistService:
             else:
                 self._lock_labels = set(DEFAULT_LOCK_LABELS)
 
+    def validate_credentials(self) -> tuple[bool, str]:
+        """Pre-check if the Todoist API token is provided and valid."""
+        token = str(getattr(self._api, "_token", "") or "").strip()
+        if not token or token.startswith("YOUR_"):
+            return False, "Todoist API token is missing or default placeholder in .env."
+
+        try:
+            self._api.get_projects()
+            return True, "Todoist API token is valid."
+        except Exception as exc:
+            return False, f"Todoist API token validation failed: {exc}"
+
     def complete_task(self, task_id: str) -> None:
         """Mark a Todoist task as completed."""
         self._api.complete_task(task_id)

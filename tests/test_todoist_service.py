@@ -236,3 +236,27 @@ class TestTodoistService:
             inst.update_task.assert_any_call(
                 task_id="p1", due_date=date(2026, 6, 29), labels=["personal"]
             )
+
+    def test_validate_credentials_valid(self) -> None:
+        with patch("services.todoist_service.TodoistAPI") as MockAPI:
+            inst = MockAPI.return_value
+            inst.get_projects.return_value = []
+            svc = TodoistService(token="valid-token")
+            ok, msg = svc.validate_credentials()
+            assert ok is True
+            assert "valid" in msg.lower()
+
+    def test_validate_credentials_missing_token(self) -> None:
+        svc = TodoistService(token="")
+        ok, msg = svc.validate_credentials()
+        assert ok is False
+        assert "missing" in msg.lower()
+
+    def test_validate_credentials_api_error(self) -> None:
+        with patch("services.todoist_service.TodoistAPI") as MockAPI:
+            inst = MockAPI.return_value
+            inst.get_projects.side_effect = Exception("401 Unauthorized")
+            svc = TodoistService(token="bad-token")
+            ok, msg = svc.validate_credentials()
+            assert ok is False
+            assert "401 Unauthorized" in msg

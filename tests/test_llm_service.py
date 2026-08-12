@@ -323,6 +323,35 @@ class TestLLMService:
         assert "local" in backends
         assert "auto_11434_ollama" in backends
 
+    def test_validate_backend_success(self) -> None:
+        cfg = LLMBackendConfig(
+            key="test", name="Test LLM", base_url="http://localhost:8000/v1", model="test"
+        )
+        mock_res = MagicMock(status_code=200)
+        with patch("httpx.Client.get", return_value=mock_res):
+            ok, msg = LLMService.validate_backend(cfg)
+            assert ok is True
+            assert "connected" in msg.lower() or "200" in msg
+
+    def test_validate_backend_auth_failed(self) -> None:
+        cfg = LLMBackendConfig(
+            key="test", name="Test LLM", base_url="http://localhost:8000/v1", model="test"
+        )
+        mock_res = MagicMock(status_code=401)
+        with patch("httpx.Client.get", return_value=mock_res):
+            ok, msg = LLMService.validate_backend(cfg)
+            assert ok is False
+            assert "api key" in msg.lower() or "401" in msg
+
+    def test_validate_backend_unreachable(self) -> None:
+        cfg = LLMBackendConfig(
+            key="test", name="Test LLM", base_url="http://localhost:8000/v1", model="test"
+        )
+        with patch("httpx.Client.get", side_effect=Exception("Connection refused")):
+            ok, msg = LLMService.validate_backend(cfg)
+            assert ok is False
+            assert "unreachable" in msg.lower() or "connection refused" in msg.lower()
+
 
 class TestBuildPrompt:
     """Direct tests for the `_build_prompt` static helper."""
