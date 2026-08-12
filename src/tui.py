@@ -361,20 +361,22 @@ class TaskMasterApp(App):
         self.last_selected_backend = selected_backend
 
         sched_text.update("[dim]Fetching Todoist & Google Calendar data...[/dim]")
-        plan_text.update(
-            f"[bold cyan]Asking LLM ({selected_backend}) for today's 1-3-5 plan...[/bold cyan]"
-        )
+        plan_text.update("[dim]Ingesting Todoist tasks & Google Calendar schedule...[/dim]")
 
-        todoist, gcal, llm = get_services(backend_key=selected_backend)
-        tasks = await asyncio.to_thread(todoist.get_todays_tasks)
-        events = await asyncio.to_thread(gcal.get_todays_events)
+        try:
+            todoist, gcal, llm = get_services(backend_key=selected_backend)
+            tasks = await asyncio.to_thread(todoist.get_todays_tasks)
+            events = await asyncio.to_thread(gcal.get_todays_events)
 
-        tz = ZoneInfo(os.getenv("TIMEZONE", "Europe/Helsinki"))
-        day_start = datetime.now(tz=tz).replace(hour=8, minute=0, second=0)
-        day_end = datetime.now(tz=tz).replace(hour=18, minute=0, second=0)
-        free_blocks = await asyncio.to_thread(
-            gcal.get_free_time_blocks, day_start=day_start, day_end=day_end
-        )
+            tz = ZoneInfo(os.getenv("TIMEZONE", "Europe/Helsinki"))
+            day_start = datetime.now(tz=tz).replace(hour=8, minute=0, second=0)
+            day_end = datetime.now(tz=tz).replace(hour=18, minute=0, second=0)
+            free_blocks = await asyncio.to_thread(
+                gcal.get_free_time_blocks, day_start=day_start, day_end=day_end
+            )
+        except Exception as exc:
+            plan_text.update(f"[bold red]❌ Ingestion Error (Todoist/GCal): {exc}[/bold red]")
+            return
 
         self.schedule_events = events
         self.free_blocks = free_blocks
@@ -403,6 +405,9 @@ class TaskMasterApp(App):
         sched_text.update(sched_table)
 
         # Call LLM
+        plan_text.update(
+            f"[bold cyan]Asking LLM ({selected_backend}) for today's 1-3-5 plan...[/bold cyan]"
+        )
         try:
             plan = await asyncio.to_thread(llm.plan_triage, tasks=tasks, free_blocks=free_blocks)
             self.last_elapsed_sec = time.perf_counter() - start_time

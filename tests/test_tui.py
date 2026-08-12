@@ -221,3 +221,16 @@ def test_format_duration():
     assert format_duration(65.2) == "1m 5s"
     assert format_duration(120.0) == "2m"
     assert format_duration(125.7) == "2m 6s"
+
+
+@pytest.mark.anyio
+async def test_tui_generate_plan_handles_gcal_todoist_error(mock_services):
+    """If GCal or Todoist raises an error, TUI reports error in plan_text."""
+    mock_services["gcal"].get_todays_events.side_effect = RuntimeError("GCal Auth Failed")
+    app = TaskMasterApp()
+    async with app.run_test() as pilot:
+        await pilot.click("#btn-generate-plan")
+        await pilot.pause()
+
+        plan_text = app.query_one("#plan-text", Static)
+        assert "Error" in str(plan_text.content) or "GCal Auth Failed" in str(plan_text.content)
