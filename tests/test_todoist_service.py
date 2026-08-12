@@ -17,6 +17,7 @@ def _make_todoist_task(
     due_date: str | None = "2026-06-28",
     is_completed: bool = False,
     is_recurring: bool = False,
+    labels: list[str] | None = None,
 ) -> MagicMock:
     """Build a fake todoist_api_python Task with the attributes we read."""
     from todoist_api_python.models import Due, Task
@@ -34,7 +35,7 @@ def _make_todoist_task(
         project_id=project_id,
         section_id=None,
         parent_id=None,
-        labels=None,
+        labels=labels,
         priority=1,
         due=due,
         deadline=None,
@@ -147,6 +148,48 @@ class TestTodoistService:
             result = self._service().get_todays_tasks()
 
         assert [t.id for t in result] == ["1", "2"]
+
+    def test_get_todays_tasks_excludes_locked_tasks_default_labels(self) -> None:
+        normal = _make_todoist_task(id="1", content="Normal task", labels=["work"])
+        locked1 = _make_todoist_task(id="2", content="Locked 1", labels=["locked"])
+        locked2 = _make_todoist_task(id="3", content="Locked 2", labels=["Lock"])
+        locked3 = _make_todoist_task(id="4", content="Locked 3", labels=["taskmaster-lock"])
+
+        with patch("services.todoist_service.TodoistAPI") as MockAPI:
+            instance = MockAPI.return_value
+            instance.get_tasks.return_value = iter([[normal, locked1, locked2, locked3]])
+
+            result = self._service().get_todays_tasks()
+
+        assert [t.id for t in result] == ["1"]
+
+    def test_get_todays_tasks_locked_labels_override_via_env(self) -> None:
+        normal = _make_todoist_task(id="1", content="Normal task", labels=["locked"])
+        locked = _make_todoist_task(id="2", content="Locked task", labels=["custom-lock"])
+
+        with (
+            patch("services.todoist_service.TodoistAPI") as MockAPI,
+            patch.dict("os.environ", {"TODOIST_LOCK_LABELS": "custom-lock, private-lock"}),
+        ):
+            instance = MockAPI.return_value
+            instance.get_tasks.return_value = iter([[normal, locked]])
+
+            result = self._service().get_todays_tasks()
+
+        assert [t.id for t in result] == ["1"]
+
+    def test_get_todays_tasks_locked_labels_override_via_init(self) -> None:
+        normal = _make_todoist_task(id="1", content="Normal task", labels=["locked"])
+        locked = _make_todoist_task(id="2", content="Locked task", labels=["do-not-triage"])
+
+        with patch("services.todoist_service.TodoistAPI") as MockAPI:
+            instance = MockAPI.return_value
+            instance.get_tasks.return_value = iter([[normal, locked]])
+
+            svc = TodoistService(token="fake-token", lock_labels=["do-not-triage"])
+            result = svc.get_todays_tasks()
+
+        assert [t.id for t in result] == ["1"]
 
     def test_postpone_task_updates_due_date(self) -> None:
         from datetime import date

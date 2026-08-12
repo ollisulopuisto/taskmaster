@@ -6,6 +6,8 @@ internal `Task` model used by the rest of the app.
 
 from __future__ import annotations
 
+import os
+from collections.abc import Iterable
 from datetime import date, datetime
 
 from todoist_api_python.api import TodoistAPI
@@ -13,12 +15,24 @@ from todoist_api_python.api import TodoistAPI
 from models.task import Task as InternalTask
 from models.task import TriagePlan
 
+DEFAULT_LOCK_LABELS = {"lock", "locked", "taskmaster-lock"}
+
 
 class TodoistService:
     """Wraps the Todoist API and returns normalized internal tasks."""
 
-    def __init__(self, token: str) -> None:
+    def __init__(self, token: str, lock_labels: Iterable[str] | None = None) -> None:
         self._api = TodoistAPI(token)
+        if lock_labels is not None:
+            self._lock_labels = {lbl.strip().lower() for lbl in lock_labels if lbl.strip()}
+        else:
+            env_labels = os.getenv("TODOIST_LOCK_LABELS")
+            if env_labels is not None:
+                self._lock_labels = {
+                    lbl.strip().lower() for lbl in env_labels.split(",") if lbl.strip()
+                }
+            else:
+                self._lock_labels = set(DEFAULT_LOCK_LABELS)
 
     def complete_task(self, task_id: str) -> None:
         """Mark a Todoist task as completed."""
@@ -45,6 +59,11 @@ class TodoistService:
                 if raw.due is None or raw.due.date is None:
                     continue
                 if getattr(raw.due, "is_recurring", False):
+                    continue
+
+                raw_labels = list(raw.labels) if raw.labels else []
+                task_labels = {lbl.lower() for lbl in raw_labels}
+                if any(lbl in self._lock_labels for lbl in task_labels):
                     continue
 
                 due = self._parse_date(raw.due.date)
