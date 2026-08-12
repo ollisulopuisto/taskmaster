@@ -396,3 +396,77 @@ class TestGCalAuth:
             )
             assert ok is False
             assert "missing" in msg.lower()
+
+
+class TestGCalInteractiveAuth:
+    """Manual in-app OAuth flow: auth URL generation and code exchange."""
+
+    _SECRETS_JSON = (
+        '{"installed": {"client_id": "cid", "project_id": "p", '
+        '"auth_uri": "https://accounts.google.com/o/oauth2/auth", '
+        '"token_uri": "https://oauth2.googleapis.com/token", '
+        '"client_secret": "secret", "redirect_uris": ["http://localhost"]}}'
+    )
+
+    def _service(self, tmp_path) -> GCalService:
+        return GCalService(
+            credentials_path=str(tmp_path / "credentials.json"),
+            token_path=str(tmp_path / "token.json"),
+        )
+
+    def test_get_auth_url_missing_credentials_raises(self, tmp_path) -> None:
+        svc = self._service(tmp_path)
+        with pytest.raises(FileNotFoundError, match="client secrets"):
+            svc.get_auth_url()
+        assert not (tmp_path / "token.json").exists()
+
+    def test_get_auth_url_returns_flow_and_url(self, tmp_path) -> None:
+        secrets = tmp_path / "credentials.json"
+        secrets.write_text(self._SECRETS_JSON)
+        svc = self._service(tmp_path)
+
+        mock_flow = MagicMock()
+        mock_flow.authorization_url.return_value = (
+            "https://accounts.google.com/o/oauth2/auth?x=1",
+            "state-123",
+        )
+        with patch(
+            "services.gcal_service.InstalledAppFlow.from_client_secrets_file",
+            return_value=mock_flow,
+        ) as mock_from_file:
+            flow, url = svc.get_auth_url()
+
+        mock_from_file.assert_called_once_with(
+            str(secrets),
+            ["https://www.googleapis.com/auth/calendar.readonly"],
+            redirect_uri="http://localhost",
+        )
+        mock_flow.authorization_url.assert_called_once_with(access_type="offline", prompt="consent")
+        assert flow is mock_flow
+        assert url == "https://accounts.google.com/o/oauth2/auth?x=1"
+        assert not (tmp_path / "token.json").exists()
+
+    def test_complete_auth_saves_token(self, tmp_path) -> None:
+        svc = self._service(tmp_path)
+        mock_flow = MagicMock()
+        mock_credentials = MagicMock()
+        mock_credentials.to_json.return_value = '{"token": "ya29.new"}'
+        mock_flow.credentials = mock_credentials
+
+        ok, msg = svc.complete_auth(mock_flow, "  abc-123  ")
+
+        assert ok is True
+        assert "saved" in msg.lower()
+        mock_flow.fetch_token.assert_called_once_with(code="abc-123")
+        assert (tmp_path / "token.json").read_text() == '{"token": "ya29.new"}'
+
+    def test_complete_auth_fetch_failure_reports_error(self, tmp_path) -> None:
+        svc = self._service(tmp_path)
+        mock_flow = MagicMock()
+        mock_flow.fetch_token.side_effect = Exception("invalid_grant")
+
+        ok, msg = svc.complete_auth(mock_flow, "bad")
+
+        assert ok is False
+        assert "invalid_grant" in msg
+        assert not (tmp_path / "token.json").exists()

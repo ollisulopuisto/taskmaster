@@ -9,18 +9,22 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+import webbrowser
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from rich.table import Table
+from textual import on
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
     Footer,
     Header,
+    Input,
     Select,
     Static,
     TabbedContent,
@@ -63,12 +67,101 @@ def get_services(backend_key: str | None = None) -> tuple[TodoistService, GCalSe
     return todoist, gcal, llm
 
 
+class AuthModal(ModalScreen[str]):
+    """Modal showing the Google auth URL and collecting the pasted code."""
+
+    BINDINGS = [("escape", "dismiss_modal", "Cancel")]
+    CSS = """
+    AuthModal {
+        align: center middle;
+        background: $background;
+    }
+    #auth-dialog {
+        width: 88;
+        max-height: 22;
+        border: thick $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    #auth-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    #auth-url {
+        width: 1fr;
+        height: auto;
+        background: $panel;
+        border: round $primary;
+        padding: 0 1;
+        margin-bottom: 1;
+    }
+    #auth-instructions {
+        height: auto;
+        margin-bottom: 1;
+    }
+    #auth-code {
+        margin-bottom: 1;
+    }
+    #auth-buttons {
+        height: 3;
+    }
+    #auth-buttons Button {
+        width: 1fr;
+        margin: 0 1;
+    }
+    """
+
+    def __init__(self, auth_url: str) -> None:
+        super().__init__()
+        self.auth_url = auth_url
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="auth-dialog"):
+            yield Static("🔑 Google Calendar Authorization", id="auth-title")
+            yield Static(self.auth_url, id="auth-url")
+            yield Static(
+                "1. Press 'Open URL' (or copy the URL above) and allow access in your browser.\n"
+                "2. The redirect lands on a localhost page that fails to load — that is normal.\n"
+                "3. Copy the value of the `code` parameter from the address bar and paste it\n"
+                "   below, then press Submit (or press Escape to cancel).",
+                id="auth-instructions",
+            )
+            yield Input(placeholder="Paste the authorization code...", id="auth-code")
+            with Horizontal(id="auth-buttons"):
+                yield Button("Open URL", id="btn-auth-open", variant="default")
+                yield Button("Submit", id="btn-auth-submit", variant="primary")
+                yield Button("Cancel", id="btn-auth-cancel", variant="error")
+
+    @on(Button.Pressed, "#btn-auth-submit")
+    def submit_auth_code(self) -> None:
+        code = self.query_one("#auth-code", Input).value.strip()
+        if code:
+            self.dismiss(code)
+
+    @on(Button.Pressed, "#btn-auth-cancel")
+    def cancel_auth(self) -> None:
+        self.dismiss(None)
+
+    @on(Button.Pressed, "#btn-auth-open")
+    def open_auth_url(self) -> None:
+        webbrowser.open(self.auth_url)
+
+    @on(Input.Submitted, "#auth-code")
+    def submit_auth_code_on_enter(self, event: Input.Submitted) -> None:
+        if event.value.strip():
+            self.dismiss(event.value.strip())
+
+    def action_dismiss_modal(self) -> None:
+        self.dismiss()
+
+
 class TaskMasterApp(App):
     """Full-featured Textual TUI Application for TaskMaster."""
 
     TITLE = "TaskMaster Triage Helper"
     SUB_TITLE = "Terminal UI (Mouse & Keyboard Enabled)"
     BINDINGS = [
+        ("a", "auth_gcal", "🔑 OAuth GCal"),
         ("g", "generate_plan", "⚡ Generate Plan"),
         ("s", "sync_plan", "💾 Confirm & Sync"),
         ("v", "save_settings", "💾 Save Settings"),
@@ -128,6 +221,7 @@ class TaskMasterApp(App):
         self.all_tasks: list[Any] = []
         self.last_elapsed_sec: float | None = None
         self.last_selected_backend: str | None = None
+        self._oauth_flow: Any = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -158,6 +252,12 @@ class TaskMasterApp(App):
                         id="select-llm-backend",
                         allow_blank=False,
                         classes="backend-select",
+                    )
+                    yield Button(
+                        "🔑 OAuth GCal (A)",
+                        id="btn-auth-gcal",
+                        variant="default",
+                        classes="action-btn",
                     )
                     yield Button(
                         "🔄 Discover LLMs",
@@ -229,6 +329,8 @@ class TaskMasterApp(App):
             if self.morning_plan:
                 self.morning_plan = self.morning_plan.reassign_task(task_id, target)
                 await self.render_plan_table()
+        elif button_id == "btn-auth-gcal":
+            await self.action_auth_gcal()
         elif button_id == "btn-discover-llm":
             await self.action_discover_llms()
         elif button_id == "btn-save-settings":
@@ -241,6 +343,32 @@ class TaskMasterApp(App):
             await self.action_submit_debrief()
         elif button_id == "btn-fetch-debug":
             await self.action_fetch_debug()
+
+    async def action_auth_gcal(self) -> None:
+        """Start interactive in-app OAuth flow for Google Calendar."""
+        plan_text = self.query_one("#plan-text", Static)
+        _, gcal, _ = get_services()
+
+        try:
+            flow, url = await asyncio.to_thread(gcal.get_auth_url)
+            self._oauth_flow = flow
+        except Exception as exc:
+            plan_text.update(f"[bold red]❌ Failed to start GCal OAuth flow: {exc}[/bold red]")
+            return
+
+        def _on_auth_complete(code: str | None = None) -> None:
+            pt = self.query_one("#plan-text", Static)
+            if not code:
+                pt.update("[yellow]OAuth flow cancelled.[/yellow]")
+                return
+
+            ok, msg = gcal.complete_auth(self._oauth_flow, code)
+            if ok:
+                pt.update(f"[bold green]✔ OAuth complete: {msg}[/bold green]")
+            else:
+                pt.update(f"[bold red]❌ OAuth exchange failed: {msg}[/bold red]")
+
+        self.push_screen(AuthModal(url), callback=_on_auth_complete)
 
     async def action_save_settings(self) -> None:
         """Save selected LLM backend settings to .env file."""

@@ -131,13 +131,16 @@ class GCalService:
                     os.remove(self._token_path)
         return None
 
-    def _run_consent_flow(self) -> Credentials:
+    def _ensure_credentials_file(self) -> None:
         if not os.path.exists(self._credentials_path):
             raise FileNotFoundError(
                 f"OAuth client secrets not found at {self._credentials_path!r}. "
                 "Download it from Google Cloud Console and place it alongside "
                 "this file, or set GOOGLE_CREDENTIALS_PATH in .env."
             )
+
+    def _run_consent_flow(self) -> Credentials:
+        self._ensure_credentials_file()
         flow = InstalledAppFlow.from_client_secrets_file(self._credentials_path, SCOPES)
         creds = flow.run_local_server(
             port=0,
@@ -147,6 +150,38 @@ class GCalService:
         )
         self._save_token(creds)
         return creds
+
+    def get_auth_url(self) -> tuple[Any, str]:
+        """Build the manual in-app OAuth flow and return ``(flow, auth_url)``.
+
+        The caller must present ``auth_url`` to the user, keep the returned
+        ``flow`` object, and pass both to :meth:`complete_auth` together with
+        the single-use authorization code. Uses a loopback redirect URI since
+        Google retired the out-of-band (OOB) console flow.
+        """
+        self._ensure_credentials_file()
+        flow = InstalledAppFlow.from_client_secrets_file(
+            self._credentials_path,
+            SCOPES,
+            redirect_uri="http://localhost",
+        )
+        url, _ = flow.authorization_url(access_type="offline", prompt="consent")
+        return flow, url
+
+    def complete_auth(self, flow: Any, code: str) -> tuple[bool, str]:
+        """Exchange an authorization code for tokens and persist them.
+
+        Returns a ``(ok, message)`` tuple. On success the authorized
+        credentials are written to ``token.json`` via :meth:`_save_token`.
+        """
+        if not callable(getattr(flow, "fetch_token", None)):
+            return False, "Invalid OAuth flow object."
+        try:
+            flow.fetch_token(code=code.strip())
+            self._save_token(flow.credentials)
+            return True, "Google Calendar OAuth token saved."
+        except Exception as exc:
+            return False, f"OAuth code exchange failed: {exc}"
 
     def _save_token(self, creds: Credentials) -> None:
         with open(self._token_path, "w") as fh:

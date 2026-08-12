@@ -9,7 +9,7 @@ import pytest
 from textual.widgets import Button, Static, TabbedContent
 
 from models.task import Task, TimeBlock, TriagePlan
-from tui import TaskMasterApp
+from tui import AuthModal, TaskMasterApp
 
 
 @pytest.fixture
@@ -307,3 +307,72 @@ async def test_tui_sync_plan_handles_error(mock_services):
 
         plan_text = app.query_one("#plan-text", Static)
         assert "Todoist Sync Failed" in str(plan_text.content) or "Error" in str(plan_text.content)
+
+
+@pytest.mark.anyio
+async def test_tui_auth_gcal_opens_modal_and_completes(mock_services):
+    """Pressing 'a' shows the OAuth modal; submitting a code completes the flow."""
+    mock_gcal = mock_services["gcal"]
+    mock_flow = MagicMock()
+    mock_gcal.get_auth_url.return_value = (
+        mock_flow,
+        "https://accounts.google.com/o/oauth2/auth?x=1",
+    )
+    mock_gcal.complete_auth.return_value = (True, "Google Calendar OAuth token saved.")
+
+    app = TaskMasterApp()
+    async with app.run_test() as pilot:
+        await pilot.press("a")
+        await pilot.pause()
+
+        assert isinstance(app.screen, AuthModal)
+        modal = app.screen
+        assert mock_flow is app._oauth_flow
+        # URL is displayed to the user
+        assert "oauth2/auth?x=1" in str(modal.query_one("#auth-url").content)
+
+        code_input = modal.query_one("#auth-code")
+        code_input.value = "auth-code-123"
+        await pilot.click("#btn-auth-submit")
+        await pilot.pause()
+
+        plan_text = app.query_one("#plan-text", Static)
+        assert "OAuth complete" in str(plan_text.content)
+
+    mock_gcal.complete_auth.assert_called_once_with(mock_flow, "auth-code-123")
+
+
+@pytest.mark.anyio
+async def test_tui_auth_gcal_cancel_skips_exchange(mock_services):
+    """Cancelling the modal does not attempt a code exchange."""
+    mock_gcal = mock_services["gcal"]
+    mock_gcal.get_auth_url.return_value = (MagicMock(), "https://accounts.google.com/oauth")
+    app = TaskMasterApp()
+    async with app.run_test() as pilot:
+        await pilot.press("a")
+        await pilot.pause()
+        await pilot.click("#btn-auth-cancel")
+        await pilot.pause()
+
+        plan_text = app.query_one("#plan-text", Static)
+        assert "cancelled" in str(plan_text.content).lower()
+
+    mock_gcal.complete_auth.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_tui_auth_gcal_missing_credentials_reports_error(monkeypatch, mock_services):
+    """Missing client secrets file is reported without opening a modal."""
+    monkeypatch.setenv("GOOGLE_CREDENTIALS_PATH", "/nonexistent/credentials.json")
+    mock_services["gcal"].get_auth_url.side_effect = FileNotFoundError(
+        "OAuth client secrets file missing at '/nonexistent/credentials.json'."
+    )
+    app = TaskMasterApp()
+    async with app.run_test() as pilot:
+        await pilot.press("a")
+        await pilot.pause()
+
+        assert not isinstance(app.screen, AuthModal)
+        plan_text = app.query_one("#plan-text", Static)
+        text = str(plan_text.content).lower()
+        assert "not found" in text or "missing" in text

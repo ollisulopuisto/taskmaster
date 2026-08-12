@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.08.12.52] - 2026-08-12
+
+### Added
+
+- **tui**: Add in-app interactive Google Calendar OAuth flow (`AuthModal` dialog, `action_auth_gcal`, keyboard binding `a`, and top-bar button `🔑 OAuth GCal (A)`). Users can now complete the Google Calendar OAuth consent flow directly inside the application, obtain the auth URL, and enter the authorization code to save `token.json` without leaving the TUI.
+
 ## [v26.08.12.51] - 2026-08-12
 
 ### Fixed
