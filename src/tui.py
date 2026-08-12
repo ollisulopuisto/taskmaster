@@ -382,8 +382,12 @@ class TaskMasterApp(App):
         from datetime import timedelta
 
         tomorrow = datetime.now().date() + timedelta(days=1)
-        await asyncio.to_thread(todoist.sync_plan_tags, self.morning_plan, tomorrow=tomorrow)
-        plan_text.update("[bold green]✔ Plan synced to Todoist![/bold green]")
+        plan_text.update("[dim]Syncing plan tags to Todoist...[/dim]")
+        try:
+            await asyncio.to_thread(todoist.sync_plan_tags, self.morning_plan, tomorrow=tomorrow)
+            plan_text.update("[bold green]✔ Plan synced to Todoist![/bold green]")
+        except Exception as exc:
+            plan_text.update(f"[bold red]❌ Todoist Sync Error: {exc}[/bold red]")
 
     async def action_generate_plan(self) -> None:
         start_time = time.perf_counter()
@@ -464,12 +468,32 @@ class TaskMasterApp(App):
 
         sched_text.update(sched_table)
 
-        # Call LLM
+        # Call LLM with live ticking timer and timeout protection
         plan_text.update(
-            f"[bold cyan]Asking LLM ({selected_backend}) for today's 1-3-5 plan...[/bold cyan]"
+            f"[bold cyan]Asking LLM ({selected_backend}) for today's 1-3-5 plan... "
+            "⏳ (0s elapsed)[/bold cyan]"
         )
         try:
-            plan = await asyncio.to_thread(llm.plan_triage, tasks=tasks, free_blocks=free_blocks)
+
+            async def _run_llm() -> TriagePlan:
+                return await asyncio.to_thread(
+                    llm.plan_triage, tasks=tasks, free_blocks=free_blocks
+                )
+
+            llm_task = asyncio.create_task(_run_llm())
+            t0 = time.perf_counter()
+            while not llm_task.done():
+                elapsed = round(time.perf_counter() - t0)
+                plan_text.update(
+                    f"[bold cyan]Asking LLM ({selected_backend}) for today's 1-3-5 plan... "
+                    f"⏳ ({elapsed}s elapsed)[/bold cyan]"
+                )
+                done, _ = await asyncio.wait([llm_task], timeout=0.5)
+                if not done and elapsed >= 120:
+                    llm_task.cancel()
+                    raise TimeoutError("LLM call timed out after 120s")
+
+            plan = llm_task.result()
             self.last_elapsed_sec = time.perf_counter() - start_time
             self.morning_plan = plan
             await self.render_plan_table()
@@ -494,43 +518,64 @@ class TaskMasterApp(App):
         from datetime import timedelta
 
         tomorrow = datetime.now().date() + timedelta(days=1)
-        for task in self.all_tasks:
-            await asyncio.to_thread(todoist.postpone_task, task.id, tomorrow)
+        evening_text.update("[dim]Rolling over tasks in Todoist...[/dim]")
+        try:
+            for task in self.all_tasks:
+                await asyncio.to_thread(todoist.postpone_task, task.id, tomorrow)
 
-        evening_text.update(
-            f"[bold green]✔ Debrief logged. {len(self.all_tasks)} tasks rolled over.[/bold green]"
-        )
+            evening_text.update(
+                f"[bold green]✔ Debrief logged. {len(self.all_tasks)} "
+                "tasks rolled over.[/bold green]"
+            )
+        except Exception as exc:
+            evening_text.update(f"[bold red]❌ Debrief Error: {exc}[/bold red]")
 
     async def action_fetch_debug(self) -> None:
         debug_text = self.query_one("#debug-text", Static)
-        debug_text.update("[dim]Fetching raw service data...[/dim]")
+        debug_text.update("[dim]Running credential pre-checks...[/dim]")
 
         backend_select = self.query_one("#select-llm-backend", Select)
         selected_backend = str(backend_select.value) if backend_select.value else None
 
         todoist, gcal, llm = get_services(backend_key=selected_backend)
-        tasks = await asyncio.to_thread(todoist.get_todays_tasks)
-        events = await asyncio.to_thread(gcal.get_todays_events)
 
-        tz = ZoneInfo(os.getenv("TIMEZONE", "Europe/Helsinki"))
-        day_start = datetime.now(tz=tz).replace(hour=8, minute=0, second=0)
-        day_end = datetime.now(tz=tz).replace(hour=18, minute=0, second=0)
-        free_blocks = await asyncio.to_thread(
-            gcal.get_free_time_blocks, day_start=day_start, day_end=day_end
-        )
-        prompt = llm._build_prompt(tasks, free_blocks)
+        # Pre-check credentials before calling service methods to prevent OAuth flow hangs
+        td_ok, td_msg = await asyncio.to_thread(todoist.validate_credentials)
+        if not td_ok:
+            debug_text.update(f"[bold red]❌ Todoist Pre-check Failed: {td_msg}[/bold red]")
+            return
 
-        debug_table = Table(title="🔍 Debug Raw Ingested Data", expand=True)
-        debug_table.add_column("Property", style="bold cyan", width=25)
-        debug_table.add_column("Details", style="white")
+        gc_ok, gc_msg = await asyncio.to_thread(gcal.validate_credentials)
+        if not gc_ok:
+            debug_text.update(f"[bold red]❌ Google Calendar Pre-check Failed: {gc_msg}[/bold red]")
+            return
 
-        debug_table.add_row("Todoist Due Tasks Count", str(len(tasks)))
-        debug_table.add_row("GCal Events Count", str(len(events)))
-        debug_table.add_row("GCal Free Blocks Count", str(len(free_blocks)))
-        debug_table.add_row("LLM Model", str(getattr(llm, "_model", "gemma4")))
-        debug_table.add_row("Generated Prompt", str(prompt))
+        debug_text.update("[dim]Fetching raw service data...[/dim]")
+        try:
+            tasks = await asyncio.to_thread(todoist.get_todays_tasks)
+            events = await asyncio.to_thread(gcal.get_todays_events)
 
-        debug_text.update(debug_table)
+            tz = ZoneInfo(os.getenv("TIMEZONE", "Europe/Helsinki"))
+            day_start = datetime.now(tz=tz).replace(hour=8, minute=0, second=0)
+            day_end = datetime.now(tz=tz).replace(hour=18, minute=0, second=0)
+            free_blocks = await asyncio.to_thread(
+                gcal.get_free_time_blocks, day_start=day_start, day_end=day_end
+            )
+            prompt = llm._build_prompt(tasks, free_blocks)
+
+            debug_table = Table(title="🔍 Debug Raw Ingested Data", expand=True)
+            debug_table.add_column("Property", style="bold cyan", width=25)
+            debug_table.add_column("Details", style="white")
+
+            debug_table.add_row("Todoist Due Tasks Count", str(len(tasks)))
+            debug_table.add_row("GCal Events Count", str(len(events)))
+            debug_table.add_row("GCal Free Blocks Count", str(len(free_blocks)))
+            debug_table.add_row("LLM Model", str(getattr(llm, "_model", "gemma4")))
+            debug_table.add_row("Generated Prompt", str(prompt))
+
+            debug_text.update(debug_table)
+        except Exception as exc:
+            debug_text.update(f"[bold red]❌ Raw Data Fetch Error: {exc}[/bold red]")
 
 
 def main() -> None:

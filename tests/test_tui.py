@@ -251,3 +251,56 @@ async def test_tui_save_settings_button(mock_services):
             mock_save.assert_called_once()
             plan_text = app.query_one("#plan-text", Static)
             assert "Saved settings" in str(plan_text.content)
+
+
+@pytest.mark.anyio
+async def test_tui_generate_plan_handles_timeout(mock_services):
+    """If LLM call times out, TUI displays explicit timeout error message."""
+    mock_services["llm"].plan_triage.side_effect = TimeoutError("LLM call timed out after 120s")
+    app = TaskMasterApp()
+    async with app.run_test() as pilot:
+        await pilot.click("#btn-generate-plan")
+        await pilot.pause()
+
+        plan_text = app.query_one("#plan-text", Static)
+        assert (
+            "timed out" in str(plan_text.content).lower()
+            or "error" in str(plan_text.content).lower()
+        )
+
+
+@pytest.mark.anyio
+async def test_tui_fetch_debug_handles_gcal_error(mock_services):
+    """If GCal pre-check fails in debug tab, TUI displays error instead of hanging."""
+    mock_services["gcal"].validate_credentials.return_value = (False, "OAuth token missing")
+    app = TaskMasterApp()
+    async with app.run_test() as pilot:
+        tabs = app.query_one(TabbedContent)
+        tabs.active = "tab-debug"
+        await pilot.pause()
+
+        await pilot.click("#btn-fetch-debug")
+        await pilot.pause()
+
+        debug_text = app.query_one("#debug-text", Static)
+        assert "OAuth token missing" in str(debug_text.content) or "Failed" in str(
+            debug_text.content
+        )
+
+
+@pytest.mark.anyio
+async def test_tui_sync_plan_handles_error(mock_services):
+    """If sync_plan_tags raises an exception, action_sync_plan displays error cleanly."""
+    mock_services["todoist"].sync_plan_tags.side_effect = RuntimeError("Todoist Sync Failed")
+    app = TaskMasterApp()
+    async with app.run_test() as pilot:
+        # Generate plan first
+        await pilot.click("#btn-generate-plan")
+        await pilot.pause()
+
+        # Click sync
+        await pilot.click("#btn-sync-plan")
+        await pilot.pause()
+
+        plan_text = app.query_one("#plan-text", Static)
+        assert "Todoist Sync Failed" in str(plan_text.content) or "Error" in str(plan_text.content)

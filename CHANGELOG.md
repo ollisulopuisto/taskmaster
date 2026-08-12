@@ -5,7 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.08.12.49] - 2026-08-12
+
+### Fixed
+
+- **tui**: Add live ticking progress loading timer (`⏳ (Xs elapsed)`) during LLM generation and 120s request timeout protection to prevent TUI hanging without visual feedback.
+- **tui**: Add GCal and Todoist credential pre-checks to `action_fetch_debug()` to prevent blocking OAuth consent flow hangs.
+- **tui**: Wrap all async TUI actions (`sync_plan`, `submit_debrief`, `fetch_debug`, `generate_plan`) in exception handlers to display explicit error messages directly in UI.
+
 ## [v26.08.12.48] - 2026-08-12
+
 
 ### Added
 
