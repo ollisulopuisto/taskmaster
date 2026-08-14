@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 Domain = Literal["work", "civilian", "family"]
 Quadrant = Literal["urgent_important", "not_urgent_important", "urgent_not_important", "neither"]
+TriageMode = Literal["balanced", "deep_work", "admin", "low_energy"]
 
 
 class Task(BaseModel):
@@ -17,6 +18,7 @@ class Task(BaseModel):
     id: str
     content: str
     project_id: str
+    project_name: str | None = None
     due_date: date | None = None
     labels: list[str] = []
     priority: int = 1
@@ -35,6 +37,26 @@ class TimeBlock(BaseModel):
 
     start: str  # ISO-8601 datetime
     end: str  # ISO-8601 duration (e.g. "PT1H") or end datetime
+
+
+class ScheduledSlot(BaseModel):
+    """A task time-blocked into a specific calendar interval."""
+
+    task_id: str
+    task_content: str
+    start_time: str
+    end_time: str
+    category: Literal["big", "medium", "small"] = "medium"
+    notes: str | None = None
+
+
+class DailySchedule(BaseModel):
+    """Structured LLM output for Pass 2 time-blocking."""
+
+    slots: list[ScheduledSlot] = []
+    total_planned_minutes: int = 0
+    is_overcapacity: bool = False
+    summary: str = ""
 
 
 class LLMBackendConfig(BaseModel):
@@ -68,6 +90,8 @@ class TriagePlan(BaseModel):
     postponed: list[Task] = []
     quadrant: Quadrant = "not_urgent_important"
     domain: Domain = "civilian"
+    mode: TriageMode = "balanced"
+    schedule: DailySchedule | None = None
 
     def reassign_task(
         self, task_id: str, target: Literal["big", "medium", "small", "postponed"]

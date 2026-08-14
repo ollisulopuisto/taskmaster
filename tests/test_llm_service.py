@@ -253,6 +253,101 @@ class TestLLMService:
         default_svc = LLMService.from_env()
         assert default_svc._model == "gemini-3.5-flash-lite"
 
+    def test_format_task_includes_labels_and_project_name(self) -> None:
+        task = Task(
+            id="t1",
+            content="Build feature",
+            project_id="p1",
+            project_name="Backend System",
+            labels=["@deepwork", "@urgent"],
+            due_date=date(2026, 8, 15),
+        )
+        formatted = LLMService._format_task(task)
+        assert "[project: Backend System]" in formatted
+        assert "[labels: @deepwork, @urgent]" in formatted
+
+    def test_build_prompt_includes_capacity_and_mode(self) -> None:
+        from models.task import TimeBlock
+
+        tasks = [_task(id="1", content="Write report")]
+        blocks = [
+            TimeBlock(
+                start="2026-08-15T09:00:00+00:00", end="2026-08-15T11:00:00+00:00"
+            ),  # 120 min
+            TimeBlock(start="2026-08-15T13:00:00+00:00", end="2026-08-15T14:00:00+00:00"),  # 60 min
+        ]
+        prompt = LLMService._build_prompt(tasks, blocks, mode="deep_work")
+        assert "Total free capacity: 180 mins" in prompt
+        assert "Triage Mode: DEEP_WORK" in prompt
+
+    def test_schedule_time_blocks_returns_daily_schedule(self) -> None:
+        from models.task import DailySchedule, ScheduledSlot, TimeBlock
+
+        tasks = [_task(id="1", content="Write report")]
+        blocks = [TimeBlock(start="2026-08-15T09:00:00+00:00", end="2026-08-15T10:30:00+00:00")]
+
+        plan = TriagePlan(big=tasks, medium=[], small=[], postponed=[])
+        fake_schedule = DailySchedule(
+            slots=[
+                ScheduledSlot(
+                    task_id="1",
+                    task_content="Write report",
+                    start_time="09:00",
+                    end_time="10:30",
+                    category="big",
+                    notes="Focused block",
+                )
+            ],
+            total_planned_minutes=90,
+            is_overcapacity=False,
+            summary="Single big task scheduled.",
+        )
+
+        fake_instructor = self._fake_instructor()
+        fake_client = fake_instructor.from_openai.return_value
+        fake_client.chat.completions.create.return_value = fake_schedule
+
+        with self._patch_instructor(fake_instructor):
+            schedule = self._service().schedule_time_blocks(plan=plan, free_blocks=blocks)
+
+        assert isinstance(schedule, DailySchedule)
+        assert len(schedule.slots) == 1
+        assert schedule.slots[0].task_id == "1"
+
+    def test_plan_triage_with_time_block_runs_second_pass(self) -> None:
+        from models.task import DailySchedule, ScheduledSlot, TimeBlock
+
+        tasks = [_task(id="1", content="Write report")]
+        blocks = [TimeBlock(start="2026-08-15T09:00:00+00:00", end="2026-08-15T10:30:00+00:00")]
+
+        raw_plan = TriagePlanIDs(big=["1"])
+        fake_schedule = DailySchedule(
+            slots=[
+                ScheduledSlot(
+                    task_id="1",
+                    task_content="Write report",
+                    start_time="09:00",
+                    end_time="10:30",
+                    category="big",
+                )
+            ],
+            total_planned_minutes=90,
+        )
+
+        fake_instructor = self._fake_instructor()
+        fake_client = fake_instructor.from_openai.return_value
+        # Side effect for first pass (TriagePlanIDs) and second pass (DailySchedule)
+        fake_client.chat.completions.create.side_effect = [raw_plan, fake_schedule]
+
+        with self._patch_instructor(fake_instructor):
+            plan = self._service().plan_triage(
+                tasks=tasks, free_blocks=blocks, mode="deep_work", time_block=True
+            )
+
+        assert plan.schedule is not None
+        assert len(plan.schedule.slots) == 1
+        assert plan.schedule.slots[0].task_id == "1"
+
     def test_discover_local_backends_finds_openai_compatible_models(self) -> None:
         """Verify discover_local_backends identifies local models from /v1/models endpoint."""
         mock_response = MagicMock()

@@ -27,7 +27,14 @@ import httpx
 import instructor
 from openai import OpenAI
 
-from models.task import LLMBackendConfig, Task, TriagePlan, TriagePlanIDs
+from models.task import (
+    DailySchedule,
+    LLMBackendConfig,
+    Task,
+    TriageMode,
+    TriagePlan,
+    TriagePlanIDs,
+)
 
 try:
     from zeroconf import ServiceBrowser, ServiceStateChange, Zeroconf
@@ -538,35 +545,72 @@ class LLMService:
 
     @classmethod
     def _compute_input_hash(
-        cls, tasks: list[Task], free_blocks: list[Any], reference_date: date | None = None
+        cls,
+        tasks: list[Task],
+        free_blocks: list[Any],
+        reference_date: date | None = None,
+        mode: TriageMode = "balanced",
     ) -> str:
         """Compute a deterministic SHA-256 hash of the input payload."""
         ref = (reference_date or date.today()).isoformat()
-        task_data = sorted([f"{t.id}:{t.content}:{t.due_date}" for t in tasks])
+        task_data = sorted(
+            [
+                f"{t.id}:{t.content}:{t.due_date}:{t.project_name or ''}:{','.join(t.labels)}"
+                for t in tasks
+            ]
+        )
         block_data = sorted([f"{b.start}:{b.end}" for b in free_blocks])
-        payload = json.dumps({"ref": ref, "tasks": task_data, "blocks": block_data}, sort_keys=True)
+        payload = json.dumps(
+            {"ref": ref, "tasks": task_data, "blocks": block_data, "mode": mode},
+            sort_keys=True,
+        )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _calculate_free_minutes(free_blocks: list[Any]) -> int:
+        """Calculate the total free minutes across provided time blocks."""
+        from datetime import datetime
+
+        total = 0
+        for b in free_blocks:
+            try:
+                start_str = getattr(b, "start", str(b))
+                end_str = getattr(b, "end", str(b))
+                if start_str and end_str:
+                    s = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+                    e = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+                    mins = int((e - s).total_seconds() // 60)
+                    if mins > 0:
+                        total += mins
+            except Exception:
+                pass
+        return total
 
     def plan_triage(
         self,
         tasks: list[Task],
         free_blocks: list[Any],
         *,
+        mode: TriageMode = "balanced",
+        time_block: bool = False,
         force_refresh: bool = False,
         reference_date: date | None = None,
     ) -> TriagePlan:
         """Ask the LLM to propose a 1-3-5 plan for today (uses disk cache if payload matches)."""
-        payload_hash = self._compute_input_hash(tasks, free_blocks, reference_date)
+        payload_hash = self._compute_input_hash(tasks, free_blocks, reference_date, mode=mode)
         cache_file = self._cache_dir / f"triage_{payload_hash}.json" if self._cache_dir else None
 
         if not force_refresh and cache_file and cache_file.exists():
             try:
                 cached_data = cache_file.read_text(encoding="utf-8")
-                return TriagePlan.model_validate_json(cached_data)
+                plan = TriagePlan.model_validate_json(cached_data)
+                if time_block and plan.schedule is None and free_blocks:
+                    plan.schedule = self.schedule_time_blocks(plan, free_blocks, mode=mode)
+                return plan
             except Exception:
                 pass  # Fallback to fresh LLM call if cache reading fails
 
-        prompt = self._build_prompt(tasks, free_blocks)
+        prompt = self._build_prompt(tasks, free_blocks, mode=mode)
         raw_plan: TriagePlanIDs = self._client.chat.completions.create(
             model=self._model,
             messages=[
@@ -577,7 +621,7 @@ class LLMService:
                         "1. P1/P2 ja 1-3pv myöhästyneet tehtävät ovat 'big' ja 'medium'.\n"
                         "2. Yli 7pv myöhästyneet 'STALE'-tehtävät menevät 'postponed'-listalle.\n"
                         "3. Kesto <= 15m tehtävät ovat 'small'.\n"
-                        "Valitse 1 Big, 3 Medium, 5 Small -tehtävää.\n"
+                        "Valitse 1 Big, 3 Medium, 5 Small -tehtävää valitun moodin mukaan.\n"
                         "TÄRKEÄÄ: Ole tiivis. Älä generoi pitkää päättelyketjua "
                         "(no long CoT reasoning).\n"
                         "Palauta ainoastaan JSON tehtävien ID-luettelona "
@@ -616,7 +660,13 @@ class LLMService:
             postponed=postponed_tasks,
             quadrant=raw_plan.quadrant,
             domain=raw_plan.domain,
+            mode=mode,
         )
+
+        if time_block and free_blocks:
+            hydrated_plan.schedule = self.schedule_time_blocks(
+                hydrated_plan, free_blocks, mode=mode
+            )
 
         if cache_file:
             try:
@@ -625,6 +675,49 @@ class LLMService:
                 pass
 
         return hydrated_plan
+
+    def schedule_time_blocks(
+        self,
+        plan: TriagePlan,
+        free_blocks: list[Any],
+        mode: TriageMode = "balanced",
+    ) -> DailySchedule:
+        """Pass 2: Map selected tasks into free calendar blocks to form a schedule."""
+        total_mins = self._calculate_free_minutes(free_blocks)
+        selected_tasks = plan.big + plan.medium + plan.small
+
+        task_lines = "\n".join(
+            f"- [{t.id}] {t.content} (duration: {t.duration_minutes or 30}m)"
+            for t in selected_tasks
+        )
+        block_lines = "\n".join(f"- {b.start} to {b.end}" for b in free_blocks)
+
+        prompt = (
+            f"Mode: {mode.upper()}\n"
+            f"Total Free Focus Capacity: {total_mins} minutes.\n\n"
+            f"Selected Triage Tasks:\n{task_lines}\n\n"
+            f"Available Time Blocks:\n{block_lines}\n\n"
+            "Fit the selected tasks into the available free time blocks. "
+            "Return a structured DailySchedule containing slot assignments, "
+            "total planned minutes, and whether capacity is exceeded."
+        )
+
+        schedule: DailySchedule = self._client.chat.completions.create(
+            model=self._model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an expert time-blocking assistant. Map the given tasks "
+                        "into available free calendar blocks. Be realistic with durations."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            response_model=DailySchedule,
+            max_tokens=self._max_tokens,
+        )
+        return schedule
 
     @staticmethod
     def _format_task(t: Task) -> str:
@@ -636,20 +729,34 @@ class LLMService:
         else:
             overdue_str = ""
         dur_str = f", dur: {t.duration_minutes}m" if t.duration_minutes else ""
-        info = f"(due: {t.due_date}{overdue_str}, priority: {prio_str}{dur_str})"
+        project_str = f" [project: {t.project_name}]" if t.project_name else ""
+        label_str = f" [labels: {', '.join(t.labels)}]" if t.labels else ""
+        details = f"(due: {t.due_date}{overdue_str}, priority: {prio_str}{dur_str})"
+        info = f"{details}{project_str}{label_str}"
         return f"- [{t.id}] {t.content} {info}"
 
     @classmethod
-    def _build_prompt(cls, tasks: list[Task], free_blocks: list[Any]) -> str:
+    def _build_prompt(
+        cls, tasks: list[Task], free_blocks: list[Any], mode: TriageMode = "balanced"
+    ) -> str:
         task_lines = "\n".join(cls._format_task(t) for t in tasks) or "(no tasks due today)"
+        total_mins = cls._calculate_free_minutes(free_blocks)
 
         block_lines = (
             "\n".join(f"- {b.start} to {b.end}" for b in free_blocks)
             or "(no free blocks identified)"
         )
+        capacity_str = (
+            f"Total free capacity: {total_mins} mins"
+            if total_mins > 0
+            else "No free blocks identified"
+        )
 
         return (
+            f"Triage Mode: {mode.upper()}\n"
+            f"Calendar Capacity: {capacity_str}\n\n"
             f"Today's tasks:\n{task_lines}\n\n"
             f"Free time blocks:\n{block_lines}\n\n"
-            "Propose a 1-3-5 plan for today and list remaining tasks under postponed."
+            "Propose a 1-3-5 plan for today according to the requested mode "
+            "and list remaining tasks under postponed."
         )

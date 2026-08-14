@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.08.14.57] - 2026-08-14
+
+### Added
+
+- **llm**: Context enrichment in prompts: added `project_name`, task `labels`, and automated `_calculate_free_minutes` focus capacity calculations.
+- **llm**: Multi-mode triage support (`TriageMode`: `balanced`, `deep_work`, `admin`, `low_energy`), allowing intent-based task selection. Mode parameter is hashed into disk cache keys.
+- **llm**: Pass 2 time-blocking scheduling (`schedule_time_blocks`) mapping 1-3-5 tasks directly into free calendar slots (`DailySchedule`).
+- **models**: Added `TriageMode`, `ScheduledSlot`, `DailySchedule`, and updated `Task` and `TriagePlan` models with `project_name`, `mode`, and `schedule` fields.
+- **tests**: Added unit tests for context enrichment, triage mode prompt building, Pass 2 time-blocking, and 2-pass `plan_triage` execution in `tests/test_llm_service.py`.
+
 ## [v26.08.14.56] - 2026-08-14
 
 ### Changed
