@@ -292,6 +292,32 @@ class GCalService:
             self._service_instance = build("calendar", "v3", credentials=self._load_credentials())
             return request_factory(self.service).execute()
 
+    @staticmethod
+    def format_event_time(ev: dict[str, Any]) -> str:
+        """Format a Google Calendar event's start/end times into a clean human-readable string.
+
+        Returns e.g. "18:00 → 21:00" for timed events, "09:30" if no end time, or "All Day".
+        """
+        start_obj = ev.get("start", {}) if isinstance(ev.get("start"), dict) else {}
+        end_obj = ev.get("end", {}) if isinstance(ev.get("end"), dict) else {}
+
+        start_dt = start_obj.get("dateTime")
+        end_dt = end_obj.get("dateTime")
+
+        if start_dt:
+            start_time = str(start_dt).split("T")[-1][:5] if "T" in str(start_dt) else str(start_dt)
+            if end_dt and "T" in str(end_dt):
+                end_time = str(end_dt).split("T")[-1][:5]
+                if end_time and end_time != start_time:
+                    return f"{start_time} → {end_time}"
+            return start_time
+
+        start_date = start_obj.get("date")
+        if start_date:
+            return "All Day"
+
+        return "?"
+
     def get_todays_events(self, *, today: date | None = None) -> list[dict[str, Any]]:
         """Return non-cancelled events occurring on `today` across all calendars."""
         reference = today or date.today()

@@ -10,6 +10,8 @@ from __future__ import annotations
 import requests
 import streamlit as st
 
+from services.gcal_service import GCalService
+
 API_BASE = "http://localhost:8002"
 
 
@@ -59,9 +61,7 @@ def render_schedule_column(schedule: dict) -> None:
         st.markdown("**Events**")
         for event in events:
             summary = event.get("summary", "(no title)")
-            start = event.get("start", {})
-            # Prefer dateTime for timed events; fall back to date for all-day.
-            when = start.get("dateTime") or start.get("date") or "?"
+            when = GCalService.format_event_time(event)
             st.markdown(f"- **{summary}** — `{when}`")
     else:
         st.markdown("_No events today._")
@@ -70,7 +70,11 @@ def render_schedule_column(schedule: dict) -> None:
     if blocks:
         st.markdown("**Free blocks**")
         for block in blocks:
-            st.markdown(f"- `{block.get('start')} → {block.get('end')}")
+            s_raw = str(block.get("start", ""))
+            e_raw = str(block.get("end", ""))
+            start_str = s_raw.split("T")[-1][:5] if "T" in s_raw else s_raw
+            end_str = e_raw.split("T")[-1][:5] if "T" in e_raw else e_raw
+            st.markdown(f"- `{start_str} → {end_str}`")
     else:
         st.markdown("_No free blocks identified._")
 
@@ -194,7 +198,7 @@ def render_debug_tab() -> None:
         if events:
             st.markdown("**Events**")
             for e in events:
-                start = e["start"].get("dateTime") or e["start"].get("date") or "?"
+                start = GCalService.format_event_time(e)
                 st.markdown(f"- **{e['summary']}** @ `{start}`")
         else:
             st.markdown("_No events today._")
@@ -203,7 +207,11 @@ def render_debug_tab() -> None:
         if blocks:
             st.markdown("**Free blocks**")
             for b in blocks:
-                st.markdown(f"- `{b['start']}` → `{b['end']}`")
+                s_raw = str(b.get("start", ""))
+                e_raw = str(b.get("end", ""))
+                start_str = s_raw.split("T")[-1][:5] if "T" in s_raw else s_raw
+                end_str = e_raw.split("T")[-1][:5] if "T" in e_raw else e_raw
+                st.markdown(f"- `{start_str} → {end_str}`")
 
     # LLM prompt
     with st.expander("🤖 LLM prompt (what gets sent to the model)", expanded=False):

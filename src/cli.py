@@ -61,7 +61,7 @@ def render_triage_plan(
     if schedule_events:
         for ev in schedule_events:
             summary = ev.get("summary", "(no title)")
-            start = ev.get("start", {}).get("dateTime") or ev.get("start", {}).get("date") or "?"
+            start = str(GCalService.format_event_time(ev))
             sched_table.add_row(start, f"[yellow]{summary}[/yellow]")
     else:
         sched_table.add_row("-", "[dim]No calendar events today[/dim]")

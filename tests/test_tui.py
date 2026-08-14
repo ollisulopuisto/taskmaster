@@ -9,6 +9,7 @@ import pytest
 from textual.widgets import Button, Static, TabbedContent
 
 from models.task import Task, TimeBlock, TriagePlan
+from services.gcal_service import GCalService
 from tui import AuthModal, TaskMasterApp
 
 
@@ -44,6 +45,7 @@ def mock_services():
         mock_gcal.validate_credentials.return_value = (True, "Valid")
         mock_gcal_cls.return_value = mock_gcal
         mock_gcal_cls.validate_credentials_static.return_value = (True, "Valid")
+        mock_gcal_cls.format_event_time.side_effect = GCalService.format_event_time
 
         mock_llm = MagicMock()
         mock_llm.plan_triage.return_value = mock_plan

@@ -470,3 +470,28 @@ class TestGCalInteractiveAuth:
         assert ok is False
         assert "invalid_grant" in msg
         assert not (tmp_path / "token.json").exists()
+
+    def test_format_event_time_range_for_timed_event(self) -> None:
+        ev = {
+            "summary": "Itä-Helsingin baarikierros",
+            "start": {"dateTime": "2026-08-14T18:00:00+03:00"},
+            "end": {"dateTime": "2026-08-14T21:00:00+03:00"},
+        }
+        res = GCalService.format_event_time(ev)
+        assert res == "18:00 → 21:00"
+
+    def test_format_event_time_for_single_time(self) -> None:
+        ev = {
+            "summary": "Pressure",
+            "start": {"dateTime": "2026-08-14T09:30:00+03:00"},
+        }
+        res = GCalService.format_event_time(ev)
+        assert res == "09:30"
+
+    def test_format_event_time_for_all_day_event(self) -> None:
+        ev = {
+            "summary": "Holiday",
+            "start": {"date": "2026-08-14"},
+        }
+        res = GCalService.format_event_time(ev)
+        assert res == "All Day"

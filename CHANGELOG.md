@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.08.14.58] - 2026-08-14
+
+### Fixed
+
+- **gcal**: Added `GCalService.format_event_time(ev)` static helper to format raw Google Calendar event datetime strings (`dateTime`/`date`) into clean, human-readable time ranges (e.g. `18:00 → 21:00`, `09:30`, or `All Day`) across TUI, CLI, and Web UI.
+- **tui**: Updated `Today's Schedule` table in `src/tui.py` to use `GCalService.format_event_time(ev)` instead of displaying raw ISO timestamps (`2026-08-14T18:00:00+03:00`).
+- **cli**: Updated schedule table rendering in `src/cli.py` to use human-readable event times.
+- **app**: Updated Streamlit Web UI (`app.py`) schedule column and expanders to display formatted event times and free-block time ranges.
+- **tests**: Added unit tests in `tests/test_gcal_service.py` for `format_event_time` (timed ranges, single times, and all-day events).
+
 ## [v26.08.14.57] - 2026-08-14
 
 ### Added

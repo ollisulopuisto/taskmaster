@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from cli import run_cli
 from models.task import Task, TimeBlock, TriagePlan
+from services.gcal_service import GCalService
 
 
 def test_cli_auto_mode(capsys, pytestconfig):
@@ -39,6 +40,7 @@ def test_cli_auto_mode(capsys, pytestconfig):
         mock_gcal.validate_credentials.return_value = (True, "Valid")
         mock_gcal_cls.return_value = mock_gcal
         mock_gcal_cls.validate_credentials_static.return_value = (True, "Valid")
+        mock_gcal_cls.format_event_time.side_effect = GCalService.format_event_time
 
         mock_llm = MagicMock()
         mock_llm.plan_triage.return_value = mock_plan
@@ -76,6 +78,7 @@ def test_cli_dry_run_flag(capsys):
         mock_gcal.validate_credentials.return_value = (True, "Valid")
         mock_gcal_cls.return_value = mock_gcal
         mock_gcal_cls.validate_credentials_static.return_value = (True, "Valid")
+        mock_gcal_cls.format_event_time.side_effect = GCalService.format_event_time
 
         mock_llm = MagicMock()
         mock_llm.plan_triage.return_value = mock_plan
@@ -113,6 +116,7 @@ def test_cli_sync_flag():
         mock_gcal.validate_credentials.return_value = (True, "Valid")
         mock_gcal_cls.return_value = mock_gcal
         mock_gcal_cls.validate_credentials_static.return_value = (True, "Valid")
+        mock_gcal_cls.format_event_time.side_effect = GCalService.format_event_time
 
         mock_llm = MagicMock()
         mock_llm.plan_triage.return_value = mock_plan
