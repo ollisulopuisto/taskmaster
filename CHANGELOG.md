@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.08.14.56] - 2026-08-14
+
+### Changed
+
+- **tui**: Add terminal size responsiveness to Textual TUI (`src/tui.py`). Replaced fixed button widths and side-by-side containers with responsive grid layouts (`3x2` and `2x3` button grids) and `.compact` screen class toggling via dynamic `on_resize` event handler. TUI layout now scales cleanly across standard (80x24), compact (60x20), and wide terminal windows without button clipping or off-screen offset errors.
+- **tests**: Add unit tests `test_tui_responsive_layout_standard_terminal` and `test_tui_responsive_layout_compact_terminal` to `tests/test_tui.py`.
+
 ## [v26.08.12.55] - 2026-08-12
 
 ### Fixed

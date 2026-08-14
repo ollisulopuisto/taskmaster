@@ -171,45 +171,91 @@ class TaskMasterApp(App):
     CSS = """
     Screen {
         background: $surface;
+        overflow: auto;
     }
     #main-tabs {
         height: 1fr;
     }
     .panel-box {
         border: solid $accent;
-        padding: 1 2;
+        padding: 1 1;
         height: 1fr;
+        min-height: 8;
     }
     .top-bar {
-        height: 3;
-        margin: 1 0;
+        height: auto;
+        min-height: 3;
+        margin: 0 0 1 0;
+        layout: grid;
+        grid-size: 3 2;
+        grid-gutter: 0 1;
     }
     .action-btn {
-        width: 1fr;
-        margin: 0 1;
+        width: 100%;
+        margin: 0;
     }
     .backend-select {
-        width: 1fr;
-        margin: 0 1;
+        width: 100%;
+        margin: 0;
     }
-    .task-row {
-        height: 3;
-        margin: 1 0;
-        border-bottom: solid $primary;
-    }
-    .task-label {
-        width: 1fr;
-        content-align: left middle;
-    }
-    .mini-btn {
-        min-width: 9;
-        margin: 0 1;
+    #morning-content-split {
+        height: 1fr;
+        width: 100%;
+        layout: horizontal;
     }
     #schedule-container {
         width: 1fr;
+        min-width: 25;
     }
     #plan-container {
         width: 2fr;
+        min-width: 35;
+    }
+    .task-row {
+        height: auto;
+        min-height: 3;
+        margin: 1 0;
+        border-bottom: solid $primary;
+        layout: horizontal;
+    }
+    .task-label {
+        width: 1fr;
+        min-width: 18;
+        content-align: left middle;
+    }
+    .mini-btn {
+        min-width: 8;
+        margin: 0 1;
+    }
+
+    /* Responsive Breakpoints for Compact Terminal Windows using .compact class */
+    Screen.compact #morning-content-split {
+        layout: vertical;
+        overflow-y: auto;
+    }
+    Screen.compact #schedule-container {
+        width: 100%;
+        height: auto;
+        min-height: 8;
+    }
+    Screen.compact #plan-container {
+        width: 100%;
+        height: auto;
+        min-height: 10;
+    }
+    Screen.compact .top-bar {
+        layout: grid;
+        grid-size: 2 3;
+        grid-gutter: 0 1;
+    }
+    Screen.compact .task-row {
+        layout: vertical;
+        height: auto;
+        padding: 1 0;
+    }
+    Screen.compact .task-label {
+        width: 100%;
+        margin-bottom: 1;
     }
     """
 
@@ -222,6 +268,10 @@ class TaskMasterApp(App):
         self.last_elapsed_sec: float | None = None
         self.last_selected_backend: str | None = None
         self._oauth_flow: Any = None
+
+    def on_resize(self, event: Any) -> None:
+        """Dynamically apply responsive styles when terminal window size changes."""
+        self.screen.set_class(event.size.width < 85, "compact")
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -283,7 +333,7 @@ class TaskMasterApp(App):
                         variant="success",
                         classes="action-btn",
                     )
-                with Horizontal():
+                with Horizontal(id="morning-content-split"):
                     with VerticalScroll(id="schedule-container", classes="panel-box"):
                         yield Static(
                             "Click [bold cyan]Generate Plan[/bold cyan] or press [bold]G[/bold].",

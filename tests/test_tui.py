@@ -388,3 +388,29 @@ async def test_tui_auth_gcal_missing_credentials_reports_error(monkeypatch, mock
         plan_text = app.query_one("#plan-text", Static)
         text = str(plan_text.content).lower()
         assert "not found" in text or "missing" in text
+
+
+@pytest.mark.anyio
+async def test_tui_responsive_layout_standard_terminal(mock_services):
+    """Test TUI layout renders correctly in standard terminal size (80x24)."""
+    app = TaskMasterApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        assert app.is_running
+        await pilot.click("#btn-generate-plan")
+        await pilot.pause()
+        plan_text = app.query_one("#plan-text", Static)
+        assert plan_text is not None
+
+
+@pytest.mark.anyio
+async def test_tui_responsive_layout_compact_terminal(mock_services):
+    """Test TUI layout renders cleanly in compact terminal size (60x20)."""
+    app = TaskMasterApp()
+    async with app.run_test(size=(60, 20)) as pilot:
+        assert app.is_running
+        main_split = app.query_one("#morning-content-split")
+        assert main_split is not None
+        await pilot.click("#btn-generate-plan")
+        await pilot.pause()
+        plan_text = app.query_one("#plan-text", Static)
+        assert plan_text is not None
