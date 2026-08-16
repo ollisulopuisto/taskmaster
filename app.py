@@ -52,6 +52,11 @@ def submit_evening(completed_ids: list[str], rolled_over_ids: list[str]) -> bool
         return False
 
 
+def render_free_block_lines(blocks: list[dict]) -> list[str]:
+    """Format free-time blocks through the shared GCal range formatter."""
+    return [GCalService.format_time_range(block.get("start"), block.get("end")) for block in blocks]
+
+
 def render_schedule_column(schedule: dict) -> None:
     """Render calendar events and free-time blocks in the left column."""
     st.subheader("Today's Schedule")
@@ -69,12 +74,8 @@ def render_schedule_column(schedule: dict) -> None:
     blocks = schedule.get("free_blocks", [])
     if blocks:
         st.markdown("**Free blocks**")
-        for block in blocks:
-            s_raw = str(block.get("start", ""))
-            e_raw = str(block.get("end", ""))
-            start_str = s_raw.split("T")[-1][:5] if "T" in s_raw else s_raw
-            end_str = e_raw.split("T")[-1][:5] if "T" in e_raw else e_raw
-            st.markdown(f"- `{start_str} → {end_str}`")
+        for when in render_free_block_lines(blocks):
+            st.markdown(f"- `{when}`")
     else:
         st.markdown("_No free blocks identified._")
 
@@ -206,12 +207,8 @@ def render_debug_tab() -> None:
         blocks = data["gcal"]["free_blocks"]
         if blocks:
             st.markdown("**Free blocks**")
-            for b in blocks:
-                s_raw = str(b.get("start", ""))
-                e_raw = str(b.get("end", ""))
-                start_str = s_raw.split("T")[-1][:5] if "T" in s_raw else s_raw
-                end_str = e_raw.split("T")[-1][:5] if "T" in e_raw else e_raw
-                st.markdown(f"- `{start_str} → {end_str}`")
+            for when in render_free_block_lines(blocks):
+                st.markdown(f"- `{when}`")
 
     # LLM prompt
     with st.expander("🤖 LLM prompt (what gets sent to the model)", expanded=False):

@@ -15,7 +15,9 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
+from rich.console import Group
 from rich.table import Table
+from rich.text import Text
 from textual import on
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -27,11 +29,12 @@ from textual.widgets import (
     Input,
     Select,
     Static,
+    Switch,
     TabbedContent,
     TabPane,
 )
 
-from models.task import TriagePlan
+from models.task import TRIAGE_MODES, TriagePlan
 from services.gcal_service import GCalService
 from services.llm_service import LLMService
 from services.todoist_service import TodoistService
@@ -51,6 +54,27 @@ def format_duration(seconds: float) -> str:
     if remaining_sec == 0:
         return f"{minutes}m"
     return f"{minutes}m {remaining_sec}s"
+
+
+def render_time_blocks(schedule: Any) -> Table:
+    """Build the Pass-2 time-blocking table for a plan's DailySchedule."""
+    over = " [bold red](over capacity)[/bold red]" if schedule.is_overcapacity else ""
+    table = Table(
+        title=f"⏱️ Time-blocked day — {schedule.total_planned_minutes} min planned{over}",
+        expand=True,
+    )
+    table.add_column("Slot", style="bold cyan", width=20)
+    table.add_column("Task", style="white")
+
+    for slot in schedule.slots:
+        note = f" [dim]({slot.notes})[/dim]" if slot.notes else ""
+        table.add_row(
+            f"{slot.start_time} → {slot.end_time}",
+            f"[bold]{slot.category.upper()}[/bold] · {slot.task_content}{note}",
+        )
+    if schedule.summary:
+        table.caption = schedule.summary
+    return table
 
 
 def get_services(backend_key: str | None = None) -> tuple[TodoistService, GCalService, LLMService]:
@@ -183,11 +207,12 @@ class TaskMasterApp(App):
         min-height: 8;
     }
     .top-bar {
-        height: auto;
-        min-height: 3;
+        /* Explicit height: an auto-sized grid can overflow a short terminal and
+           paint on top of the panels below it. */
+        height: 6;
         margin: 0 0 1 0;
         layout: grid;
-        grid-size: 3 2;
+        grid-size: 4 2;
         grid-gutter: 0 1;
     }
     .action-btn {
@@ -197,6 +222,16 @@ class TaskMasterApp(App):
     .backend-select {
         width: 100%;
         margin: 0;
+    }
+    .switch-row {
+        width: 100%;
+        height: 3;
+        align: left middle;
+    }
+    .switch-label {
+        width: 1fr;
+        content-align: left middle;
+        padding: 1 0 0 1;
     }
     #morning-content-split {
         height: 1fr;
@@ -245,8 +280,9 @@ class TaskMasterApp(App):
     }
     Screen.compact .top-bar {
         layout: grid;
-        grid-size: 2 3;
+        grid-size: 2 4;
         grid-gutter: 0 1;
+        height: 12;
     }
     Screen.compact .task-row {
         layout: vertical;
@@ -303,6 +339,16 @@ class TaskMasterApp(App):
                         allow_blank=False,
                         classes="backend-select",
                     )
+                    yield Select(
+                        [(m.replace("_", " ").title(), m) for m in TRIAGE_MODES],
+                        value="balanced",
+                        id="select-triage-mode",
+                        allow_blank=False,
+                        classes="backend-select",
+                    )
+                    with Horizontal(classes="switch-row"):
+                        yield Switch(value=False, id="switch-time-block")
+                        yield Static("⏱️ Time-block", classes="switch-label")
                     yield Button(
                         "🔑 OAuth GCal (A)",
                         id="btn-auth-gcal",
@@ -406,8 +452,8 @@ class TaskMasterApp(App):
         _, gcal, _ = get_services()
 
         try:
-            flow, url, done_event, code_box = await asyncio.to_thread(gcal.start_local_auth_server)
-            self._oauth_flow = flow
+            session = await asyncio.to_thread(gcal.start_local_auth_server)
+            self._oauth_flow = session.flow
         except Exception as exc:
             plan_text.update(f"[bold red]❌ Failed to start GCal OAuth flow: {exc}[/bold red]")
             return
@@ -415,33 +461,45 @@ class TaskMasterApp(App):
         # Show the URL and open it; the user just approves in the browser.
         from rich.markup import escape as rich_escape
 
-        plan_text.update(
-            "[bold cyan]🔑 Google Calendar OAuth[/bold cyan]\n\n"
-            "Opening browser… if it doesn't open automatically, visit:\n"
-            f"{rich_escape(url)}\n\n"
-            "[dim]Waiting for browser approval (timeout: 2 min)…[/dim]"
-        )
-        webbrowser.open(url)
-
-        # Wait in a background thread so the TUI stays responsive.
-        completed = await asyncio.to_thread(done_event.wait, _auth_timeout)
-
-        if not completed:
+        try:
             plan_text.update(
-                "[bold red]❌ OAuth timed out (2 min). Press 🔑 OAuth GCal to try again.[/bold red]"
+                "[bold cyan]🔑 Google Calendar OAuth[/bold cyan]\n\n"
+                "Opening browser… if it doesn't open automatically, visit:\n"
+                f"{rich_escape(session.url)}\n\n"
+                "[dim]Waiting for browser approval (timeout: 2 min)…[/dim]"
             )
-            return
+            webbrowser.open(session.url)
 
-        code = code_box[0]
-        if not code:
-            plan_text.update("[bold red]❌ No authorization code received.[/bold red]")
-            return
+            # Wait in a background thread so the TUI stays responsive.
+            completed = await asyncio.to_thread(session.done_event.wait, _auth_timeout)
 
-        ok, msg = await asyncio.to_thread(gcal.complete_auth, flow, code)
-        if ok:
-            plan_text.update(f"[bold green]✔ {msg}[/bold green]")
-        else:
-            plan_text.update(f"[bold red]❌ OAuth exchange failed: {msg}[/bold red]")
+            if not completed:
+                plan_text.update(
+                    "[bold red]❌ OAuth timed out (2 min). "
+                    "Press 🔑 OAuth GCal to try again.[/bold red]"
+                )
+                return
+
+            if session.error:
+                plan_text.update(
+                    f"[bold red]❌ Google rejected the request: "
+                    f"{rich_escape(session.error)}[/bold red]"
+                )
+                return
+
+            code = session.code_box[0]
+            if not code:
+                plan_text.update("[bold red]❌ No authorization code received.[/bold red]")
+                return
+
+            ok, msg = await asyncio.to_thread(gcal.complete_auth, session.flow, code)
+            if ok:
+                plan_text.update(f"[bold green]✔ {msg}[/bold green]")
+            else:
+                plan_text.update(f"[bold red]❌ OAuth exchange failed: {msg}[/bold red]")
+        finally:
+            # Always release the loopback port, timeout or not.
+            await asyncio.to_thread(session.close)
 
     async def action_save_settings(self) -> None:
         """Save selected LLM backend settings to .env file."""
@@ -509,7 +567,8 @@ class TaskMasterApp(App):
             else ""
         )
         plan_table = Table(
-            title=f"🎯 1-3-5 Daily Plan ({plan.quadrant} / {plan.domain}){dur_str}", expand=True
+            title=(f"🎯 1-3-5 Daily Plan ({plan.quadrant} / {plan.domain} / {plan.mode}){dur_str}"),
+            expand=True,
         )
         plan_table.add_column("Category", style="bold cyan", width=16)
         plan_table.add_column("Task Content", style="white")
@@ -527,6 +586,9 @@ class TaskMasterApp(App):
             plan_table.add_row(
                 "[dim magenta]POSTPONED[/dim magenta]", f"[dim]{t.content}[/dim]{stale_badge}"
             )
+
+        if plan.schedule and plan.schedule.slots:
+            plan_table = Group(plan_table, Text(""), render_time_blocks(plan.schedule))
 
         await plan_container.mount(Static(plan_table, id="plan-text"))
 
@@ -599,6 +661,10 @@ class TaskMasterApp(App):
         selected_backend = str(backend_select.value) if backend_select.value else None
         self.last_selected_backend = selected_backend
 
+        mode_select = self.query_one("#select-triage-mode", Select)
+        selected_mode = str(mode_select.value) if mode_select.value else "balanced"
+        time_block = self.query_one("#switch-time-block", Switch).value
+
         plan_text.update("[dim]Running API credential & server pre-checks...[/dim]")
 
         # 1. Pre-check Google Calendar OAuth credentials statically
@@ -664,9 +730,8 @@ class TaskMasterApp(App):
 
         if free_blocks:
             for fb in free_blocks:
-                start_str = fb.start.split("T")[-1][:5] if "T" in fb.start else fb.start
-                end_str = fb.end.split("T")[-1][:5] if "T" in fb.end else fb.end
-                sched_table.add_row(f"{start_str} → {end_str}", "[green]Free time block[/green]")
+                when = GCalService.format_time_range(fb.start, fb.end)
+                sched_table.add_row(when, "[green]Free time block[/green]")
 
         sched_text.update(sched_table)
 
@@ -679,7 +744,11 @@ class TaskMasterApp(App):
 
             async def _run_llm() -> TriagePlan:
                 return await asyncio.to_thread(
-                    llm.plan_triage, tasks=tasks, free_blocks=free_blocks
+                    llm.plan_triage,
+                    tasks=tasks,
+                    free_blocks=free_blocks,
+                    mode=selected_mode,
+                    time_block=time_block,
                 )
 
             llm_task = asyncio.create_task(_run_llm())

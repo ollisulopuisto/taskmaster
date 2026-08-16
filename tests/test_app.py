@@ -60,3 +60,41 @@ class TestSubmitEvening:
         mock_post.side_effect = requests.ConnectionError("down")
 
         assert submit_evening(["1"], []) is False
+
+
+class TestScheduleRendering:
+    """The Streamlit column must reuse the shared GCal formatter, not re-slice strings."""
+
+    def test_free_blocks_use_the_shared_formatter(self) -> None:
+        from app import render_schedule_column
+
+        schedule = {
+            "events": [
+                {
+                    "summary": "Team Sync",
+                    "start": {"dateTime": "2026-08-14T09:00:00+03:00"},
+                    "end": {"dateTime": "2026-08-14T09:30:00+03:00"},
+                }
+            ],
+            "free_blocks": [
+                {"start": "2026-08-14T10:00:00+03:00", "end": "2026-08-14T12:00:00+03:00"}
+            ],
+        }
+
+        with patch("app.st"), patch("app.GCalService") as mock_gcal:
+            mock_gcal.format_event_time.return_value = "09:00 → 09:30"
+            mock_gcal.format_time_range.return_value = "10:00 → 12:00"
+            render_schedule_column(schedule)
+
+        mock_gcal.format_event_time.assert_called_once()
+        mock_gcal.format_time_range.assert_called_once_with(
+            "2026-08-14T10:00:00+03:00", "2026-08-14T12:00:00+03:00"
+        )
+
+    def test_debug_tab_free_blocks_use_the_shared_formatter(self) -> None:
+        from app import render_free_block_lines
+
+        lines = render_free_block_lines(
+            [{"start": "2026-08-14T10:00:00+03:00", "end": "2026-08-14T12:00:00+03:00"}]
+        )
+        assert lines == ["10:00 → 12:00"]

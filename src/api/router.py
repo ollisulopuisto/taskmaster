@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, FastAPI
 from pydantic import BaseModel
 
+from models.task import TriageMode
 from services.gcal_service import GCalService
 from services.llm_service import LLMService
 from services.todoist_service import TodoistService
@@ -64,8 +65,15 @@ def _get_dependencies() -> dict[str, Any]:
 
 
 @router.get("/morning")
-def morning_triage() -> dict[str, Any]:
-    """Return the LLM's proposed 1-3-5 plan plus today's GCal schedule."""
+def morning_triage(
+    mode: TriageMode = "balanced",
+    time_block: bool = False,
+) -> dict[str, Any]:
+    """Return the LLM's proposed 1-3-5 plan plus today's GCal schedule.
+
+    ``mode`` shapes how the LLM picks the tasks; ``time_block`` additionally runs
+    pass 2, fitting the selected tasks into today's free calendar blocks.
+    """
     deps = _get_dependencies()
     tasks = deps["todoist"].get_todays_tasks()
     events = deps["gcal"].get_todays_events()
@@ -74,7 +82,12 @@ def morning_triage() -> dict[str, Any]:
         day_start=datetime.now(tz=tz).replace(hour=8, minute=0, second=0),
         day_end=datetime.now(tz=tz).replace(hour=18, minute=0, second=0),
     )
-    plan: Any = deps["llm"].plan_triage(tasks=tasks, free_blocks=free_blocks)
+    plan: Any = deps["llm"].plan_triage(
+        tasks=tasks,
+        free_blocks=free_blocks,
+        mode=mode,
+        time_block=time_block,
+    )
     return {
         "plan": plan.model_dump(),
         "schedule": {

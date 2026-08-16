@@ -260,3 +260,65 @@ class TestTodoistService:
             ok, msg = svc.validate_credentials()
             assert ok is False
             assert "401 Unauthorized" in msg
+
+
+class TestProjectNameEnrichment:
+    """`Task.project_name` feeds the LLM prompt, so it must actually be populated."""
+
+    def _service(self) -> TodoistService:
+        return TodoistService(token="fake-token")
+
+    @staticmethod
+    def _project(id: str, name: str) -> MagicMock:
+        proj = MagicMock()
+        proj.id = id
+        proj.name = name
+        return proj
+
+    def test_project_name_is_resolved_from_the_projects_api(self) -> None:
+        fake_task = _make_todoist_task(id="1", project_id="proj-1", due_date="2026-06-28")
+        with patch("services.todoist_service.TodoistAPI") as mock_api:
+            instance = mock_api.return_value
+            instance.get_tasks.return_value = iter([[fake_task]])
+            instance.get_projects.return_value = iter([[self._project("proj-1", "Backend")]])
+
+            tasks = self._service().get_todays_tasks(today=date(2026, 6, 28))
+
+        assert tasks[0].project_name == "Backend"
+
+    def test_flat_project_list_is_also_supported(self) -> None:
+        fake_task = _make_todoist_task(id="1", project_id="proj-1", due_date="2026-06-28")
+        with patch("services.todoist_service.TodoistAPI") as mock_api:
+            instance = mock_api.return_value
+            instance.get_tasks.return_value = iter([[fake_task]])
+            instance.get_projects.return_value = [self._project("proj-1", "Backend")]
+
+            tasks = self._service().get_todays_tasks(today=date(2026, 6, 28))
+
+        assert tasks[0].project_name == "Backend"
+
+    def test_project_lookup_failure_does_not_break_ingestion(self) -> None:
+        fake_task = _make_todoist_task(id="1", project_id="proj-1", due_date="2026-06-28")
+        with patch("services.todoist_service.TodoistAPI") as mock_api:
+            instance = mock_api.return_value
+            instance.get_tasks.return_value = iter([[fake_task]])
+            instance.get_projects.side_effect = Exception("500 Server Error")
+
+            tasks = self._service().get_todays_tasks(today=date(2026, 6, 28))
+
+        assert len(tasks) == 1
+        assert tasks[0].project_name is None
+
+    def test_projects_are_fetched_once_per_ingest(self) -> None:
+        tasks_in = [
+            _make_todoist_task(id="1", project_id="proj-1", due_date="2026-06-28"),
+            _make_todoist_task(id="2", project_id="proj-1", due_date="2026-06-28"),
+        ]
+        with patch("services.todoist_service.TodoistAPI") as mock_api:
+            instance = mock_api.return_value
+            instance.get_tasks.return_value = iter([tasks_in])
+            instance.get_projects.return_value = iter([[self._project("proj-1", "Backend")]])
+
+            self._service().get_todays_tasks(today=date(2026, 6, 28))
+
+        assert instance.get_projects.call_count == 1

@@ -477,7 +477,7 @@ class TestGCalInteractiveAuth:
             "start": {"dateTime": "2026-08-14T18:00:00+03:00"},
             "end": {"dateTime": "2026-08-14T21:00:00+03:00"},
         }
-        res = GCalService.format_event_time(ev)
+        res = GCalService.format_event_time(ev, tz="Europe/Helsinki")
         assert res == "18:00 → 21:00"
 
     def test_format_event_time_for_single_time(self) -> None:
@@ -485,7 +485,7 @@ class TestGCalInteractiveAuth:
             "summary": "Pressure",
             "start": {"dateTime": "2026-08-14T09:30:00+03:00"},
         }
-        res = GCalService.format_event_time(ev)
+        res = GCalService.format_event_time(ev, tz="Europe/Helsinki")
         assert res == "09:30"
 
     def test_format_event_time_for_all_day_event(self) -> None:
@@ -495,3 +495,176 @@ class TestGCalInteractiveAuth:
         }
         res = GCalService.format_event_time(ev)
         assert res == "All Day"
+
+
+class TestFormatEventTime:
+    """Timezone handling, multi-day spans and the shared range formatter."""
+
+    def test_multi_day_timed_event_includes_dates(self) -> None:
+        ev = {
+            "summary": "Conference",
+            "start": {"dateTime": "2026-08-14T18:00:00+03:00"},
+            "end": {"dateTime": "2026-08-16T18:00:00+03:00"},
+        }
+        assert (
+            GCalService.format_event_time(ev, tz="Europe/Helsinki") == "14.8. 18:00 → 16.8. 18:00"
+        )
+
+    def test_utc_times_are_converted_to_display_timezone(self) -> None:
+        ev = {
+            "summary": "Standup",
+            "start": {"dateTime": "2026-08-14T15:00:00Z"},
+            "end": {"dateTime": "2026-08-14T16:00:00Z"},
+        }
+        assert GCalService.format_event_time(ev, tz="Europe/Helsinki") == "18:00 → 19:00"
+
+    def test_zero_length_event_shows_a_single_time(self) -> None:
+        ev = {
+            "start": {"dateTime": "2026-08-14T09:30:00+03:00"},
+            "end": {"dateTime": "2026-08-14T09:30:00+03:00"},
+        }
+        assert GCalService.format_event_time(ev, tz="Europe/Helsinki") == "09:30"
+
+    def test_multi_day_all_day_event_shows_inclusive_span(self) -> None:
+        # Google's all-day `end.date` is exclusive: 17th means the event ends on the 16th.
+        ev = {
+            "summary": "Vacation",
+            "start": {"date": "2026-08-14"},
+            "end": {"date": "2026-08-17"},
+        }
+        assert GCalService.format_event_time(ev) == "All Day (14.8. → 16.8.)"
+
+    def test_format_time_range_is_shared_by_free_blocks(self) -> None:
+        res = GCalService.format_time_range(
+            "2026-08-14T09:00:00+03:00", "2026-08-14T11:30:00+03:00", tz="Europe/Helsinki"
+        )
+        assert res == "09:00 → 11:30"
+
+    def test_format_time_range_falls_back_on_unparseable_input(self) -> None:
+        assert GCalService.format_time_range("garbage", "junk") == "garbage → junk"
+
+    def test_format_time_range_handles_missing_end(self) -> None:
+        res = GCalService.format_time_range("2026-08-14T09:00:00+03:00", "", tz="Europe/Helsinki")
+        assert res == "09:00"
+
+
+class TestCredentialPathAnchoring:
+    _SECRETS_JSON = (
+        '{"installed": {"client_id": "cid", "project_id": "p", '
+        '"auth_uri": "https://accounts.google.com/o/oauth2/auth", '
+        '"token_uri": "https://oauth2.googleapis.com/token", '
+        '"client_secret": "secret", "redirect_uris": ["http://localhost"]}}'
+    )
+
+    def test_validate_credentials_static_anchors_bare_filenames(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Bare filenames must resolve like the instance does, not only against CWD."""
+        from pathlib import Path
+
+        root = tmp_path / "root"
+        root.mkdir()
+        (root / "credentials.json").write_text(self._SECRETS_JSON)
+
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+
+        with patch("services.gcal_service._PROJECT_ROOT", Path(root)):
+            ok, msg = GCalService.validate_credentials_static()
+
+        assert ok is False
+        # The secrets file *does* exist at the project root, so the failure must be
+        # "no token yet", never "client secrets missing".
+        assert "authentication required" in msg.lower()
+
+    def test_static_and_instance_resolve_to_the_same_files(self, tmp_path, monkeypatch) -> None:
+        from pathlib import Path
+
+        root = tmp_path / "root"
+        root.mkdir()
+        (root / "credentials.json").write_text(self._SECRETS_JSON)
+        monkeypatch.chdir(tmp_path)
+
+        with patch("services.gcal_service._PROJECT_ROOT", Path(root)):
+            svc = GCalService()
+            static_msg = GCalService.validate_credentials_static()[1]
+            instance_msg = svc.validate_credentials()[1]
+
+        assert Path(svc._credentials_path).parent == Path(svc._token_path).parent
+        assert static_msg == instance_msg
+
+
+class TestLocalAuthServer:
+    """The loopback OAuth callback server must survive noise and report denials."""
+
+    _SECRETS_JSON = TestCredentialPathAnchoring._SECRETS_JSON
+
+    def _start(self, tmp_path):
+        (tmp_path / "credentials.json").write_text(self._SECRETS_JSON)
+        svc = GCalService(
+            credentials_path=str(tmp_path / "credentials.json"),
+            token_path=str(tmp_path / "token.json"),
+        )
+        mock_flow = MagicMock()
+        mock_flow.authorization_url.return_value = ("https://accounts.google.com/auth?x=1", "st")
+        with patch(
+            "services.gcal_service.InstalledAppFlow.from_client_secrets_file",
+            return_value=mock_flow,
+        ):
+            session = svc.start_local_auth_server()
+        return session
+
+    @staticmethod
+    def _get(port: int, path: str) -> None:
+        import urllib.request
+
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=3) as resp:
+            resp.read()
+
+    def test_noise_request_does_not_end_the_flow(self, tmp_path) -> None:
+        session = self._start(tmp_path)
+        try:
+            self._get(session.port, "/favicon.ico")
+            assert session.done_event.wait(0.3) is False, "favicon request ended the OAuth wait"
+
+            self._get(session.port, "/?code=abc123&state=st")
+            assert session.done_event.wait(3) is True
+            assert session.code_box[0] == "abc123"
+            assert session.error is None
+        finally:
+            session.close()
+
+    def test_denied_consent_is_reported_as_an_error(self, tmp_path) -> None:
+        session = self._start(tmp_path)
+        try:
+            self._get(session.port, "/?error=access_denied&state=st")
+            assert session.done_event.wait(3) is True
+            assert session.code_box[0] == ""
+            assert "access_denied" in (session.error or "")
+        finally:
+            session.close()
+
+    def test_advertised_port_is_the_one_actually_listening(self, tmp_path) -> None:
+        session = self._start(tmp_path)
+        try:
+            assert f":{session.port}" in session.redirect_uri
+            # No bind/close/rebind gap: connecting to the advertised port must work.
+            self._get(session.port, "/ping")
+        finally:
+            session.close()
+
+    def test_close_releases_the_port_and_stops_the_thread(self, tmp_path) -> None:
+        import socket
+
+        session = self._start(tmp_path)
+        port = session.port
+        session.close()
+
+        assert session.thread.is_alive() is False
+        probe = socket.socket()
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind(("127.0.0.1", port))  # must not raise: the server let go
+        finally:
+            probe.close()

@@ -663,3 +663,101 @@ class TestLanDiscovery:
         assert (
             backends["auto_lan_192_168_1_50_11434_qwen"].base_url == "http://192.168.1.50:11434/v1"
         )
+
+
+class TestFreeMinutes:
+    """Capacity maths must not silently swallow blocks."""
+
+    def test_supports_mapping_shaped_blocks(self) -> None:
+        blocks = [{"start": "2026-08-15T09:00:00+00:00", "end": "2026-08-15T10:30:00+00:00"}]
+        assert LLMService._calculate_free_minutes(blocks) == 90
+
+    def test_handles_naive_and_aware_mix(self) -> None:
+        from models.task import TimeBlock
+
+        blocks = [TimeBlock(start="2026-08-15T09:00:00", end="2026-08-15T10:00:00+00:00")]
+        assert LLMService._calculate_free_minutes(blocks) == 60
+
+    def test_unparseable_block_is_logged_not_swallowed(self, caplog) -> None:
+        import logging
+
+        from models.task import TimeBlock
+
+        with caplog.at_level(logging.WARNING, logger="services.llm_service"):
+            total = LLMService._calculate_free_minutes([TimeBlock(start="nope", end="nah")])
+
+        assert total == 0
+        assert "nope" in caplog.text
+
+    def test_build_prompt_accepts_mapping_shaped_blocks(self) -> None:
+        tasks = [_task(id="1")]
+        blocks = [{"start": "2026-08-15T09:00:00+00:00", "end": "2026-08-15T11:00:00+00:00"}]
+        prompt = LLMService._build_prompt(tasks, blocks)
+        assert "Total free capacity: 120 mins" in prompt
+        assert "2026-08-15T09:00:00+00:00 to 2026-08-15T11:00:00+00:00" in prompt
+
+    def test_compute_input_hash_accepts_mapping_shaped_blocks(self) -> None:
+        blocks = [{"start": "2026-08-15T09:00:00+00:00", "end": "2026-08-15T11:00:00+00:00"}]
+        digest = LLMService._compute_input_hash([_task(id="1")], blocks, date(2026, 8, 15))
+        assert len(digest) == 64
+
+
+class TestTimeBlockCaching:
+    """Pass 2 results must be persisted, not recomputed on every cache hit."""
+
+    @staticmethod
+    def _fake_create(**kwargs):
+        from models.task import DailySchedule, ScheduledSlot
+
+        if kwargs.get("response_model").__name__ == "DailySchedule":
+            return DailySchedule(
+                slots=[
+                    ScheduledSlot(
+                        task_id="1",
+                        task_content="Write report",
+                        start_time="09:00",
+                        end_time="10:00",
+                    )
+                ],
+                total_planned_minutes=60,
+                summary="ok",
+            )
+        return TriagePlanIDs(big=["1"])
+
+    def test_schedule_is_written_back_to_the_cache(self, tmp_path) -> None:
+        from models.task import TimeBlock
+
+        tasks = [_task(id="1", content="Write report")]
+        blocks = [TimeBlock(start="2026-08-15T09:00:00+00:00", end="2026-08-15T11:00:00+00:00")]
+
+        service = LLMService(model="test", base_url="http://fake", cache_dir=str(tmp_path))
+        service._client = MagicMock()
+        service._client.chat.completions.create.side_effect = self._fake_create
+
+        # 1. Plain triage, no time blocking: 1 LLM call, cached without a schedule.
+        service.plan_triage(tasks, blocks, reference_date=date(2026, 8, 15))
+        assert service._client.chat.completions.create.call_count == 1
+
+        # 2. Same input, now asking for time blocking: cache hit + 1 pass-2 call.
+        plan = service.plan_triage(tasks, blocks, time_block=True, reference_date=date(2026, 8, 15))
+        assert service._client.chat.completions.create.call_count == 2
+        assert plan.schedule is not None
+
+        # 3. Third run must be fully cached — the schedule was persisted in step 2.
+        plan = service.plan_triage(tasks, blocks, time_block=True, reference_date=date(2026, 8, 15))
+        assert service._client.chat.completions.create.call_count == 2
+        assert plan.schedule is not None
+        assert plan.schedule.slots[0].task_id == "1"
+
+    def test_schedule_time_blocks_accepts_mapping_shaped_blocks(self) -> None:
+        service = LLMService(model="test", base_url="http://fake", cache_dir="")
+        service._client = MagicMock()
+        service._client.chat.completions.create.side_effect = self._fake_create
+
+        plan = TriagePlan(big=[_task(id="1", content="Write report")])
+        blocks = [{"start": "2026-08-15T09:00:00+00:00", "end": "2026-08-15T11:00:00+00:00"}]
+        schedule = service.schedule_time_blocks(plan, blocks)
+
+        assert schedule.total_planned_minutes == 60
+        prompt = service._client.chat.completions.create.call_args.kwargs["messages"][1]["content"]
+        assert "Total Free Focus Capacity: 120 minutes" in prompt

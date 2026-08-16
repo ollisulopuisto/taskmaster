@@ -19,11 +19,12 @@ from __future__ import annotations
 
 import os
 import threading
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
+from zoneinfo import ZoneInfo
 
 from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
@@ -37,6 +38,43 @@ SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
 _TOKEN_PATH = "token.json"
 # Project root = taskmaster/ (two levels up from src/services/)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_FALLBACK_TZ = "Europe/Helsinki"
+
+
+def _display_tz(tz: str | ZoneInfo | None = None) -> ZoneInfo:
+    """Resolve the timezone calendar times are rendered in.
+
+    Mirrors the rest of the app: explicit argument, else ``TIMEZONE`` from the
+    environment, else Europe/Helsinki.
+    """
+    if isinstance(tz, ZoneInfo):
+        return tz
+    name = tz or os.getenv("TIMEZONE") or _FALLBACK_TZ
+    try:
+        return ZoneInfo(name)
+    except Exception:
+        return ZoneInfo(_FALLBACK_TZ)
+
+
+def _parse_iso(value: Any) -> datetime | None:
+    """Best-effort ISO-8601 parse; returns None for anything unparseable."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _short_date(dt: datetime | date) -> str:
+    """Render a date the way Finnish calendars do: ``14.8.``"""
+    return f"{dt.day}.{dt.month}."
+
+
+def _raw_time(value: Any) -> str:
+    """Last-resort formatting for values that are not valid ISO-8601."""
+    text = str(value or "")
+    return text.split("T")[-1][:5] if "T" in text else text
 
 
 def _anchor(path: str) -> str:
@@ -60,6 +98,56 @@ def _resolve_token_path(credentials_path: str, token_path: str) -> str:
         return token_path
     creds_dir = os.path.dirname(os.path.abspath(_anchor(credentials_path)))
     return str(Path(creds_dir) / token_path)
+
+
+class LocalAuthSession:
+    """Handle on a running loopback OAuth callback server.
+
+    ``done_event`` fires once Google redirects back with either an authorization
+    code (in ``code_box[0]``) or an error (in ``error``). Requests that carry
+    neither — favicon probes, prefetches, port scans — are answered and ignored,
+    so a stray hit cannot end the flow with an empty code.
+
+    Always call :meth:`close` when finished (including on timeout) to release the
+    port and stop the background thread.
+    """
+
+    def __init__(
+        self,
+        *,
+        flow: Any,
+        url: str,
+        done_event: threading.Event,
+        code_box: list[str],
+        error_box: list[str | None],
+        port: int,
+        redirect_uri: str,
+        server: HTTPServer,
+        thread: threading.Thread,
+    ) -> None:
+        self.flow = flow
+        self.url = url
+        self.done_event = done_event
+        self.code_box = code_box
+        self.port = port
+        self.redirect_uri = redirect_uri
+        self.thread = thread
+        self._error_box = error_box
+        self._server = server
+
+    @property
+    def error(self) -> str | None:
+        """OAuth error reported by Google (e.g. ``access_denied``), if any."""
+        return self._error_box[0]
+
+    def close(self, timeout: float = 3.0) -> None:
+        """Stop the callback server and wait for its thread to exit."""
+        self.done_event.set()
+        self.thread.join(timeout=timeout)
+        try:
+            self._server.server_close()
+        except Exception:
+            pass
 
 
 class GCalService:
@@ -98,7 +186,15 @@ class GCalService:
         credentials_path: str = "credentials.json",
         token_path: str = _TOKEN_PATH,
     ) -> tuple[bool, str]:
-        """Pre-check Google Calendar OAuth credential & token state without blocking."""
+        """Pre-check Google Calendar OAuth credential & token state without blocking.
+
+        Bare filenames are resolved exactly like the instance resolves them, so a
+        pre-check run from a different working directory cannot disagree with the
+        service it is gating.
+        """
+        credentials_path = _anchor(credentials_path)
+        token_path = _resolve_token_path(credentials_path, token_path)
+
         if os.path.exists(token_path):
             try:
                 creds = Credentials.from_authorized_user_file(token_path, SCOPES)
@@ -197,28 +293,83 @@ class GCalService:
         url, _ = flow.authorization_url(access_type="offline", prompt="consent")
         return flow, url
 
-    def start_local_auth_server(
-        self,
-    ) -> tuple[Any, str, threading.Event, list[str]]:
-        """Start a local loopback HTTP server and return ``(flow, url, done_event, code_box)``.
+    _AUTH_PAGE_OK = (
+        "<html><body style='font-family:sans-serif;padding:2em'>"
+        "<h2>✅ Kirjautuminen onnistui!</h2>"
+        "<p>Voit sulkea tämän välilehden ja palata sovellukseen.</p>"
+        "</body></html>"
+    )
+    _AUTH_PAGE_DENIED = (
+        "<html><body style='font-family:sans-serif;padding:2em'>"
+        "<h2>❌ Kirjautuminen keskeytyi</h2>"
+        "<p>Palaa sovellukseen ja yritä uudelleen.</p>"
+        "</body></html>"
+    )
+    _AUTH_PAGE_WAITING = (
+        "<html><body style='font-family:sans-serif;padding:2em'>"
+        "<p>Odotetaan Googlen uudelleenohjausta…</p>"
+        "</body></html>"
+    )
 
-        Binds to a random free port on localhost, builds the OAuth URL pointing
-        at it, then starts a background thread that handles exactly one request
-        (the Google redirect) and stores the authorization code in ``code_box[0]``
-        before setting ``done_event``.  The caller should poll or wait on
-        ``done_event`` and read ``code_box[0]``.
+    def start_local_auth_server(self, *, poll_interval: float = 0.5) -> LocalAuthSession:
+        """Start a loopback HTTP server and return a :class:`LocalAuthSession`.
 
-        >>> flow, url, done, code_box = gcal.start_local_auth_server()
-        >>> webbrowser.open(url)           # open in browser
-        >>> done.wait(timeout=120)         # wait up to 2 min
-        >>> gcal.complete_auth(flow, code_box[0])
+        The server binds a random free port and keeps that exact socket — the
+        advertised redirect URI is always the port already being listened on, so
+        no other process can slip in between binding and serving. It then keeps
+        serving until Google redirects back with a ``code`` or an ``error``;
+        unrelated requests (favicon probes, prefetches) are answered and ignored.
+
+        >>> session = gcal.start_local_auth_server()
+        >>> webbrowser.open(session.url)
+        >>> try:
+        ...     if session.done_event.wait(timeout=120) and session.code_box[0]:
+        ...         gcal.complete_auth(session.flow, session.code_box[0])
+        ... finally:
+        ...     session.close()
         """
         self._ensure_credentials_file()
 
-        # Bind on a random free port to get the port number.
-        srv = HTTPServer(("127.0.0.1", 0), BaseHTTPRequestHandler)
-        port = srv.server_address[1]
-        srv.server_close()
+        done_event: threading.Event = threading.Event()
+        code_box: list[str] = [""]
+        error_box: list[str | None] = [None]
+        pages = (self._AUTH_PAGE_OK, self._AUTH_PAGE_DENIED, self._AUTH_PAGE_WAITING)
+
+        class _Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_: Any) -> None:  # silence server logs
+                pass
+
+            def do_GET(self) -> None:  # noqa: N802
+                ok_page, denied_page, waiting_page = pages
+                qs = parse_qs(urlparse(self.path).query)
+                code = (qs.get("code") or [""])[0]
+                error = (qs.get("error") or [""])[0]
+
+                if code:
+                    code_box[0] = code
+                    page = ok_page
+                elif error:
+                    error_box[0] = error
+                    page = denied_page
+                else:
+                    # Not the OAuth redirect (favicon, prefetch, port probe) —
+                    # answer politely and keep waiting for the real one.
+                    page = waiting_page
+
+                body = page.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+                if code or error:
+                    done_event.set()
+
+        # Bind once and serve on that same socket — no close/rebind race.
+        server = HTTPServer(("127.0.0.1", 0), _Handler)
+        server.timeout = poll_interval
+        port = server.server_address[1]
 
         redirect_uri = f"http://localhost:{port}"
         flow = InstalledAppFlow.from_client_secrets_file(
@@ -228,41 +379,27 @@ class GCalService:
         )
         url, _ = flow.authorization_url(access_type="offline", prompt="consent")
 
-        done_event: threading.Event = threading.Event()
-        code_box: list[str] = [""]
-
-        class _Handler(BaseHTTPRequestHandler):
-            def log_message(self, *_: Any) -> None:  # silence server logs
-                pass
-
-            def do_GET(self) -> None:  # noqa: N802
-                qs = parse_qs(urlparse(self.path).query)
-                codes = qs.get("code", [])
-                code_box[0] = codes[0] if codes else ""
-                body = (
-                    b"<html><body style='font-family:sans-serif;padding:2em'>"
-                    b"<h2>\xe2\x9c\x85 Kirjautuminen onnistui!</h2>"
-                    b"<p>Voit sulkea t\xc3\xa4m\xc3\xa4n v\xc3\xa4lilehden "
-                    b"ja palata sovellukseen.</p>"
-                    b"</body></html>"
-                )
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-                done_event.set()
-
-        one_shot_server = HTTPServer(("127.0.0.1", port), _Handler)
-
         def _serve() -> None:
-            one_shot_server.handle_request()  # blocks until one request arrives
-            one_shot_server.server_close()
+            # handle_request() returns after `poll_interval` if nothing arrived,
+            # which is what lets close() stop this loop.
+            while not done_event.is_set():
+                server.handle_request()
+            server.server_close()
 
-        t = threading.Thread(target=_serve, daemon=True)
-        t.start()
+        thread = threading.Thread(target=_serve, daemon=True)
+        thread.start()
 
-        return flow, url, done_event, code_box
+        return LocalAuthSession(
+            flow=flow,
+            url=url,
+            done_event=done_event,
+            code_box=code_box,
+            error_box=error_box,
+            port=port,
+            redirect_uri=redirect_uri,
+            server=server,
+            thread=thread,
+        )
 
     def complete_auth(self, flow: Any, code: str) -> tuple[bool, str]:
         """Exchange an authorization code for tokens and persist them.
@@ -293,27 +430,62 @@ class GCalService:
             return request_factory(self.service).execute()
 
     @staticmethod
-    def format_event_time(ev: dict[str, Any]) -> str:
-        """Format a Google Calendar event's start/end times into a clean human-readable string.
+    def format_time_range(start: Any, end: Any = None, tz: str | ZoneInfo | None = None) -> str:
+        """Format an ISO-8601 interval as a human-readable range.
 
-        Returns e.g. "18:00 → 21:00" for timed events, "09:30" if no end time, or "All Day".
+        Times are converted to the display timezone (``TIMEZONE`` env, default
+        Europe/Helsinki), so a UTC value renders as local wall-clock time. Spans
+        crossing midnight carry their dates so they cannot be mistaken for a
+        same-day event. Unparseable input degrades to the raw strings.
+        """
+        zone = _display_tz(tz)
+
+        def _localize(dt: datetime) -> datetime:
+            # Naive values carry no offset; treat them as already local.
+            return dt.astimezone(zone) if dt.tzinfo else dt
+
+        start_dt = _parse_iso(start)
+        if start_dt is None:
+            raw_start, raw_end = _raw_time(start), _raw_time(end)
+            return f"{raw_start} → {raw_end}" if raw_end else raw_start
+
+        start_dt = _localize(start_dt)
+        end_dt = _parse_iso(end)
+        if end_dt is None:
+            return start_dt.strftime("%H:%M")
+
+        end_dt = _localize(end_dt)
+        if end_dt == start_dt:
+            return start_dt.strftime("%H:%M")
+        if end_dt.date() == start_dt.date():
+            return f"{start_dt:%H:%M} → {end_dt:%H:%M}"
+        return f"{_short_date(start_dt)} {start_dt:%H:%M} → {_short_date(end_dt)} {end_dt:%H:%M}"
+
+    @staticmethod
+    def format_event_time(ev: dict[str, Any], tz: str | ZoneInfo | None = None) -> str:
+        """Format a Google Calendar event's start/end into a human-readable string.
+
+        Returns e.g. "18:00 → 21:00" for a timed event, "14.8. 18:00 → 16.8. 18:00"
+        when it spans days, "All Day" / "All Day (14.8. → 16.8.)" for all-day events.
         """
         start_obj = ev.get("start", {}) if isinstance(ev.get("start"), dict) else {}
         end_obj = ev.get("end", {}) if isinstance(ev.get("end"), dict) else {}
 
-        start_dt = start_obj.get("dateTime")
-        end_dt = end_obj.get("dateTime")
-
-        if start_dt:
-            start_time = str(start_dt).split("T")[-1][:5] if "T" in str(start_dt) else str(start_dt)
-            if end_dt and "T" in str(end_dt):
-                end_time = str(end_dt).split("T")[-1][:5]
-                if end_time and end_time != start_time:
-                    return f"{start_time} → {end_time}"
-            return start_time
+        if start_obj.get("dateTime"):
+            return GCalService.format_time_range(
+                start_obj.get("dateTime"), end_obj.get("dateTime"), tz=tz
+            )
 
         start_date = start_obj.get("date")
         if start_date:
+            try:
+                first = date.fromisoformat(str(start_date))
+                # Google's all-day end.date is exclusive — step back to the last day.
+                last = date.fromisoformat(str(end_obj.get("date"))) - timedelta(days=1)
+            except (TypeError, ValueError):
+                return "All Day"
+            if last > first:
+                return f"All Day ({_short_date(first)} → {_short_date(last)})"
             return "All Day"
 
         return "?"

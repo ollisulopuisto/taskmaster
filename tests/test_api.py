@@ -283,3 +283,58 @@ class TestEveningEndpoint:
 
         assert called_with == [tomorrow]
         assert svc.complete_task.call_count == 1
+
+
+class TestTriageModeParameters:
+    """`mode` and `time_block` must be reachable through the HTTP API."""
+
+    @pytest.fixture
+    def client(self) -> TestClient:
+        return TestClient(app)
+
+    def test_morning_forwards_mode_and_time_block(self, client: TestClient) -> None:
+        with (
+            patch("api.router.TodoistService") as MockTodoist,
+            patch("api.router.GCalService") as MockGCal,
+            patch("api.router.LLMService") as MockLLM,
+        ):
+            MockLLM.from_env.return_value = MockLLM.return_value
+            MockTodoist.return_value.get_todays_tasks.return_value = []
+            MockGCal.return_value.get_todays_events.return_value = []
+            MockGCal.return_value.get_free_time_blocks.return_value = []
+            MockLLM.return_value.plan_triage.return_value = TriagePlan()
+
+            response = client.get("/api/triage/morning?mode=deep_work&time_block=true")
+
+        assert response.status_code == 200
+        kwargs = MockLLM.return_value.plan_triage.call_args.kwargs
+        assert kwargs["mode"] == "deep_work"
+        assert kwargs["time_block"] is True
+
+    def test_morning_rejects_unknown_mode(self, client: TestClient) -> None:
+        with (
+            patch("api.router.TodoistService"),
+            patch("api.router.GCalService"),
+            patch("api.router.LLMService"),
+        ):
+            response = client.get("/api/triage/morning?mode=nonsense")
+
+        assert response.status_code == 422
+
+    def test_morning_defaults_to_balanced_without_time_blocking(self, client: TestClient) -> None:
+        with (
+            patch("api.router.TodoistService") as MockTodoist,
+            patch("api.router.GCalService") as MockGCal,
+            patch("api.router.LLMService") as MockLLM,
+        ):
+            MockLLM.from_env.return_value = MockLLM.return_value
+            MockTodoist.return_value.get_todays_tasks.return_value = []
+            MockGCal.return_value.get_todays_events.return_value = []
+            MockGCal.return_value.get_free_time_blocks.return_value = []
+            MockLLM.return_value.plan_triage.return_value = TriagePlan()
+
+            client.get("/api/triage/morning")
+
+        kwargs = MockLLM.return_value.plan_triage.call_args.kwargs
+        assert kwargs["mode"] == "balanced"
+        assert kwargs["time_block"] is False

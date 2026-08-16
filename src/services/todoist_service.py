@@ -6,6 +6,7 @@ internal `Task` model used by the rest of the app.
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Iterable
 from datetime import date, datetime
@@ -14,6 +15,8 @@ from todoist_api_python.api import TodoistAPI
 
 from models.task import Task as InternalTask
 from models.task import TriagePlan
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_LOCK_LABELS = {"lock", "locked", "taskmaster-lock"}
 
@@ -55,12 +58,34 @@ class TodoistService:
         target_date = date.fromisoformat(new_date) if isinstance(new_date, str) else new_date
         self._api.update_task(task_id=task_id, due_date=target_date)
 
+    def _project_names(self) -> dict[str, str]:
+        """Map project id -> name, so tasks can carry their project as LLM context.
+
+        Fetched once per ingest. A failure here must not sink the whole ingest —
+        the project name is enrichment, not a required field.
+        """
+        names: dict[str, str] = {}
+        try:
+            result = self._api.get_projects()
+            for item in result:
+                # The SDK paginates (list of pages); older versions return a flat list.
+                page = item if isinstance(item, list) else [item]
+                for project in page:
+                    project_id = getattr(project, "id", None)
+                    project_name = getattr(project, "name", None)
+                    if project_id and project_name:
+                        names[str(project_id)] = str(project_name)
+        except Exception as exc:
+            logger.warning("Could not fetch Todoist project names: %s", exc)
+        return names
+
     def get_todays_tasks(self, *, today: date | None = None) -> list[InternalTask]:
         """Return incomplete tasks due today or overdue.
 
         `today` is injectable for deterministic tests.
         """
         reference = today or date.today()
+        project_names = self._project_names()
         paginator = self._api.get_tasks()
 
         normalized: list[InternalTask] = []
@@ -98,6 +123,7 @@ class TodoistService:
                         id=raw.id,
                         content=raw.content,
                         project_id=raw.project_id,
+                        project_name=project_names.get(str(raw.project_id)),
                         due_date=due,
                         labels=list(raw.labels) if raw.labels else [],
                         priority=raw.priority or 1,

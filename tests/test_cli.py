@@ -41,6 +41,7 @@ def test_cli_auto_mode(capsys, pytestconfig):
         mock_gcal_cls.return_value = mock_gcal
         mock_gcal_cls.validate_credentials_static.return_value = (True, "Valid")
         mock_gcal_cls.format_event_time.side_effect = GCalService.format_event_time
+        mock_gcal_cls.format_time_range.side_effect = GCalService.format_time_range
 
         mock_llm = MagicMock()
         mock_llm.plan_triage.return_value = mock_plan
@@ -79,6 +80,7 @@ def test_cli_dry_run_flag(capsys):
         mock_gcal_cls.return_value = mock_gcal
         mock_gcal_cls.validate_credentials_static.return_value = (True, "Valid")
         mock_gcal_cls.format_event_time.side_effect = GCalService.format_event_time
+        mock_gcal_cls.format_time_range.side_effect = GCalService.format_time_range
 
         mock_llm = MagicMock()
         mock_llm.plan_triage.return_value = mock_plan
@@ -117,6 +119,7 @@ def test_cli_sync_flag():
         mock_gcal_cls.return_value = mock_gcal
         mock_gcal_cls.validate_credentials_static.return_value = (True, "Valid")
         mock_gcal_cls.format_event_time.side_effect = GCalService.format_event_time
+        mock_gcal_cls.format_time_range.side_effect = GCalService.format_time_range
 
         mock_llm = MagicMock()
         mock_llm.plan_triage.return_value = mock_plan
@@ -175,3 +178,101 @@ def test_cli_precheck_gcal_failure(capsys):
         mock_gcal.get_todays_events.assert_not_called()
         captured = capsys.readouterr()
         assert "Google Calendar OAuth token missing" in captured.out
+
+
+def _cli_mocks(mock_plan, mock_events=None, mock_blocks=None):
+    """Context-manager stack shared by the triage-mode tests."""
+    mock_todoist = MagicMock()
+    mock_todoist.get_todays_tasks.return_value = list(mock_plan.big)
+    mock_todoist.validate_credentials.return_value = (True, "Valid")
+
+    mock_gcal = MagicMock()
+    mock_gcal.get_todays_events.return_value = mock_events or []
+    mock_gcal.get_free_time_blocks.return_value = mock_blocks or []
+    mock_gcal.validate_credentials.return_value = (True, "Valid")
+
+    mock_llm = MagicMock()
+    mock_llm.plan_triage.return_value = mock_plan
+    return mock_todoist, mock_gcal, mock_llm
+
+
+def test_cli_passes_mode_and_time_block_to_llm():
+    """--mode / --time-block must reach plan_triage, otherwise the feature is dead."""
+    task = Task(id="t1", content="Big task", project_id="p1", due_date=date.today(), priority=4)
+    mock_plan = TriagePlan(big=[task])
+    mock_todoist, mock_gcal, mock_llm = _cli_mocks(mock_plan)
+
+    with (
+        patch("cli.TodoistService", return_value=mock_todoist),
+        patch("cli.GCalService") as mock_gcal_cls,
+        patch("cli.LLMService") as mock_llm_cls,
+    ):
+        mock_gcal_cls.return_value = mock_gcal
+        mock_gcal_cls.validate_credentials_static.return_value = (True, "Valid")
+        mock_gcal_cls.format_event_time.side_effect = GCalService.format_event_time
+        mock_gcal_cls.format_time_range.side_effect = GCalService.format_time_range
+        mock_llm_cls.from_env.return_value = mock_llm
+        mock_llm_cls.validate_backend.return_value = (True, "Valid")
+
+        run_cli(auto=True, mode="deep_work", time_block=True)
+
+    kwargs = mock_llm.plan_triage.call_args.kwargs
+    assert kwargs["mode"] == "deep_work"
+    assert kwargs["time_block"] is True
+
+
+def test_cli_renders_the_time_blocked_schedule(capsys):
+    """A plan carrying a DailySchedule must be rendered, not silently dropped."""
+    from models.task import DailySchedule, ScheduledSlot
+
+    task = Task(id="t1", content="Write the report", project_id="p1", due_date=date.today())
+    mock_plan = TriagePlan(
+        big=[task],
+        schedule=DailySchedule(
+            slots=[
+                ScheduledSlot(
+                    task_id="t1",
+                    task_content="Write the report",
+                    start_time="09:00",
+                    end_time="10:30",
+                    category="big",
+                )
+            ],
+            total_planned_minutes=90,
+            summary="One focus block.",
+        ),
+    )
+    mock_todoist, mock_gcal, mock_llm = _cli_mocks(mock_plan)
+
+    with (
+        patch("cli.TodoistService", return_value=mock_todoist),
+        patch("cli.GCalService") as mock_gcal_cls,
+        patch("cli.LLMService") as mock_llm_cls,
+    ):
+        mock_gcal_cls.return_value = mock_gcal
+        mock_gcal_cls.validate_credentials_static.return_value = (True, "Valid")
+        mock_gcal_cls.format_event_time.side_effect = GCalService.format_event_time
+        mock_gcal_cls.format_time_range.side_effect = GCalService.format_time_range
+        mock_llm_cls.from_env.return_value = mock_llm
+        mock_llm_cls.validate_backend.return_value = (True, "Valid")
+
+        run_cli(time_block=True)
+
+    out = capsys.readouterr().out
+    assert "09:00" in out
+    assert "10:30" in out
+
+
+def test_cli_argparse_exposes_mode_and_time_block():
+    """`main()` must forward the new flags to run_cli."""
+    import sys
+
+    from cli import main
+
+    argv = ["taskmaster-cli", "--auto", "--mode", "low_energy", "--time-block"]
+    with patch.object(sys, "argv", argv), patch("cli.run_cli") as mock_run:
+        main()
+
+    kwargs = mock_run.call_args.kwargs
+    assert kwargs["mode"] == "low_energy"
+    assert kwargs["time_block"] is True

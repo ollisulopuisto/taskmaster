@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import BaseModel
 
 Domain = Literal["work", "civilian", "family"]
 Quadrant = Literal["urgent_important", "not_urgent_important", "urgent_not_important", "neither"]
 TriageMode = Literal["balanced", "deep_work", "admin", "low_energy"]
+# Single source of truth for UIs that need to enumerate the modes (argparse, TUI).
+TRIAGE_MODES: tuple[str, ...] = get_args(TriageMode)
 
 
 class Task(BaseModel):

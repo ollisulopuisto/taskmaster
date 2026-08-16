@@ -46,6 +46,7 @@ def mock_services():
         mock_gcal_cls.return_value = mock_gcal
         mock_gcal_cls.validate_credentials_static.return_value = (True, "Valid")
         mock_gcal_cls.format_event_time.side_effect = GCalService.format_event_time
+        mock_gcal_cls.format_time_range.side_effect = GCalService.format_time_range
 
         mock_llm = MagicMock()
         mock_llm.plan_triage.return_value = mock_plan
@@ -312,69 +313,6 @@ async def test_tui_sync_plan_handles_error(mock_services):
 
 
 @pytest.mark.anyio
-async def test_tui_auth_gcal_completes_automatically(mock_services):
-    """OAuth flow completes automatically when the callback server receives the code."""
-    import threading
-
-    mock_gcal = mock_services["gcal"]
-    mock_flow = MagicMock()
-
-    # Pre-fire the done_event so the TUI doesn't actually wait.
-    done_event = threading.Event()
-    done_event.set()
-    code_box: list[str] = ["auto-captured-code"]
-
-    mock_gcal.start_local_auth_server.return_value = (
-        mock_flow,
-        "https://accounts.google.com/o/oauth2/auth?x=1",
-        done_event,
-        code_box,
-    )
-    mock_gcal.complete_auth.return_value = (True, "Google Calendar OAuth token saved.")
-
-    app = TaskMasterApp()
-    async with app.run_test() as pilot:
-        await pilot.press("a")
-        await pilot.pause(0.2)
-
-        plan_text = app.query_one("#plan-text", Static)
-        assert "token saved" in str(plan_text.content).lower()
-
-    mock_gcal.complete_auth.assert_called_once_with(mock_flow, "auto-captured-code")
-
-
-@pytest.mark.anyio
-async def test_tui_auth_gcal_timeout_reports_error(mock_services):
-    """When the OAuth callback times out, an error message is shown."""
-    import threading
-
-    mock_gcal = mock_services["gcal"]
-    mock_flow = MagicMock()
-
-    # done_event that never fires — wait(0) returns False immediately.
-    done_event = threading.Event()  # not set
-    code_box: list[str] = [""]
-
-    mock_gcal.start_local_auth_server.return_value = (
-        mock_flow,
-        "https://accounts.google.com/o/oauth2/auth?x=1",
-        done_event,
-        code_box,
-    )
-
-    app = TaskMasterApp()
-    async with app.run_test() as pilot:
-        # Call with _auth_timeout=0 so wait() returns False immediately.
-        await app.action_auth_gcal(_auth_timeout=0)
-        await pilot.pause(0.1)
-
-        plan_text = app.query_one("#plan-text", Static)
-        assert "timed out" in str(plan_text.content).lower()
-
-    mock_gcal.complete_auth.assert_not_called()
-
-
-@pytest.mark.anyio
 async def test_tui_auth_gcal_missing_credentials_reports_error(monkeypatch, mock_services):
     """Missing client secrets file is reported without opening a modal."""
     monkeypatch.setenv("GOOGLE_CREDENTIALS_PATH", "/nonexistent/credentials.json")
@@ -416,3 +354,135 @@ async def test_tui_responsive_layout_compact_terminal(mock_services):
         await pilot.pause()
         plan_text = app.query_one("#plan-text", Static)
         assert plan_text is not None
+
+
+def _render(renderable) -> str:
+    """Render a Rich renderable to plain text so assertions can inspect it."""
+    from rich.console import Console
+
+    console = Console(width=200, record=True, force_terminal=False)
+    console.print(renderable)
+    return console.export_text()
+
+
+@pytest.mark.anyio
+async def test_tui_passes_selected_mode_and_time_block_to_llm(mock_services):
+    """The triage-mode Select and time-block switch must reach plan_triage."""
+    from textual.widgets import Select, Switch
+
+    app = TaskMasterApp()
+    async with app.run_test() as pilot:
+        app.query_one("#select-triage-mode", Select).value = "deep_work"
+        app.query_one("#switch-time-block", Switch).value = True
+        await pilot.pause()
+
+        await pilot.click("#btn-generate-plan")
+        await pilot.pause()
+
+    kwargs = mock_services["llm"].plan_triage.call_args.kwargs
+    assert kwargs["mode"] == "deep_work"
+    assert kwargs["time_block"] is True
+
+
+@pytest.mark.anyio
+async def test_tui_renders_time_blocked_schedule(mock_services):
+    """A plan carrying a DailySchedule is shown in the plan panel."""
+    from models.task import DailySchedule, ScheduledSlot
+
+    plan = mock_services["plan"]
+    plan.schedule = DailySchedule(
+        slots=[
+            ScheduledSlot(
+                task_id="t1",
+                task_content="Big task",
+                start_time="09:00",
+                end_time="10:30",
+                category="big",
+            )
+        ],
+        total_planned_minutes=90,
+        summary="One focus block.",
+    )
+
+    app = TaskMasterApp()
+    async with app.run_test() as pilot:
+        await pilot.click("#btn-generate-plan")
+        await pilot.pause()
+
+        plan_text = _render(app.query_one("#plan-text", Static).content)
+
+    assert "09:00" in plan_text
+    assert "10:30" in plan_text
+
+
+def _auth_session(*, code: str = "", error: str | None = None, fire: bool = True):
+    """Build a stand-in for gcal.start_local_auth_server()'s return value."""
+    import threading
+
+    session = MagicMock()
+    session.flow = MagicMock()
+    session.url = "https://accounts.google.com/o/oauth2/auth?x=1"
+    session.done_event = threading.Event()
+    if fire:
+        session.done_event.set()
+    session.code_box = [code]
+    session.error = error
+    return session
+
+
+@pytest.mark.anyio
+async def test_tui_auth_gcal_completes_from_session_object(mock_services):
+    """The captured code is exchanged and the session is always closed."""
+    mock_gcal = mock_services["gcal"]
+    session = _auth_session(code="auto-captured-code")
+    mock_gcal.start_local_auth_server.return_value = session
+    mock_gcal.complete_auth.return_value = (True, "Google Calendar OAuth token saved.")
+
+    app = TaskMasterApp()
+    async with app.run_test() as pilot:
+        await pilot.press("a")
+        await pilot.pause(0.2)
+
+        plan_text = app.query_one("#plan-text", Static)
+        assert "token saved" in str(plan_text.content).lower()
+
+    mock_gcal.complete_auth.assert_called_once_with(session.flow, "auto-captured-code")
+    session.close.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_tui_auth_gcal_closes_session_on_timeout(mock_services):
+    """A timed-out flow must release the loopback port instead of leaking it."""
+    mock_gcal = mock_services["gcal"]
+    session = _auth_session(fire=False)
+    mock_gcal.start_local_auth_server.return_value = session
+
+    app = TaskMasterApp()
+    async with app.run_test() as pilot:
+        await app.action_auth_gcal(_auth_timeout=0)
+        await pilot.pause(0.1)
+
+        plan_text = app.query_one("#plan-text", Static)
+        assert "timed out" in str(plan_text.content).lower()
+
+    mock_gcal.complete_auth.assert_not_called()
+    session.close.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_tui_auth_gcal_reports_denied_consent(mock_services):
+    """`?error=access_denied` is surfaced verbatim rather than as 'no code'."""
+    mock_gcal = mock_services["gcal"]
+    session = _auth_session(error="access_denied")
+    mock_gcal.start_local_auth_server.return_value = session
+
+    app = TaskMasterApp()
+    async with app.run_test() as pilot:
+        await pilot.press("a")
+        await pilot.pause(0.2)
+
+        text = str(app.query_one("#plan-text", Static).content).lower()
+
+    assert "access_denied" in text
+    mock_gcal.complete_auth.assert_not_called()
+    session.close.assert_called_once()

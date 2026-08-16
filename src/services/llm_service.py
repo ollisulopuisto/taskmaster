@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import socket
 import time
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +45,8 @@ except ImportError:
     ServiceStateChange = None  # type: ignore[assignment]
     Zeroconf = None  # type: ignore[assignment]
 
+
+logger = logging.getLogger(__name__)
 
 # mDNS service types that LLM servers advertise on the LAN.
 LAN_LLM_SERVICE_TYPES = ["_ollama._tcp.local.", "_llm._tcp.local.", "_openai._tcp.local."]
@@ -543,6 +547,19 @@ class LLMService:
 
         path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
 
+    @staticmethod
+    def _block_bounds(block: Any) -> tuple[str, str]:
+        """Return ``(start, end)`` for a time block, object- or mapping-shaped.
+
+        Free blocks arrive as :class:`TimeBlock` objects from the GCal service but
+        as plain dicts when they have made a round trip through JSON (API, cache,
+        Streamlit). Both must work — silently reading neither is how capacity
+        quietly became zero.
+        """
+        if isinstance(block, Mapping):
+            return str(block.get("start", "")), str(block.get("end", ""))
+        return str(getattr(block, "start", "") or ""), str(getattr(block, "end", "") or "")
+
     @classmethod
     def _compute_input_hash(
         cls,
@@ -559,31 +576,45 @@ class LLMService:
                 for t in tasks
             ]
         )
-        block_data = sorted([f"{b.start}:{b.end}" for b in free_blocks])
+        block_data = sorted(f"{start}:{end}" for start, end in map(cls._block_bounds, free_blocks))
         payload = json.dumps(
             {"ref": ref, "tasks": task_data, "blocks": block_data, "mode": mode},
             sort_keys=True,
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
-    @staticmethod
-    def _calculate_free_minutes(free_blocks: list[Any]) -> int:
-        """Calculate the total free minutes across provided time blocks."""
-        from datetime import datetime
+    @classmethod
+    def _calculate_free_minutes(cls, free_blocks: list[Any]) -> int:
+        """Calculate the total free minutes across provided time blocks.
 
+        A block that cannot be parsed is skipped *and logged* — reporting zero
+        capacity to the LLM without a trace makes it silently plan a day that
+        looks fully booked.
+        """
         total = 0
-        for b in free_blocks:
+        for block in free_blocks:
+            start_str, end_str = cls._block_bounds(block)
+            if not start_str or not end_str:
+                logger.warning("Skipping free block with missing bounds: %r", block)
+                continue
             try:
-                start_str = getattr(b, "start", str(b))
-                end_str = getattr(b, "end", str(b))
-                if start_str and end_str:
-                    s = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
-                    e = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
-                    mins = int((e - s).total_seconds() // 60)
-                    if mins > 0:
-                        total += mins
-            except Exception:
-                pass
+                start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+                end = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+            except ValueError:
+                logger.warning("Skipping unparseable free block %s → %s", start_str, end_str)
+                continue
+
+            # Mixing naive and aware values raises; assume the naive side shares
+            # the other side's offset rather than dropping the block.
+            if (start.tzinfo is None) != (end.tzinfo is None):
+                if start.tzinfo is None:
+                    start = start.replace(tzinfo=end.tzinfo)
+                else:
+                    end = end.replace(tzinfo=start.tzinfo)
+
+            minutes = int((end - start).total_seconds() // 60)
+            if minutes > 0:
+                total += minutes
         return total
 
     def plan_triage(
@@ -606,6 +637,8 @@ class LLMService:
                 plan = TriagePlan.model_validate_json(cached_data)
                 if time_block and plan.schedule is None and free_blocks:
                     plan.schedule = self.schedule_time_blocks(plan, free_blocks, mode=mode)
+                    # Persist pass 2 as well, or every later run pays for it again.
+                    self._write_cache(cache_file, plan)
                 return plan
             except Exception:
                 pass  # Fallback to fresh LLM call if cache reading fails
@@ -668,13 +701,19 @@ class LLMService:
                 hydrated_plan, free_blocks, mode=mode
             )
 
-        if cache_file:
-            try:
-                cache_file.write_text(hydrated_plan.model_dump_json(), encoding="utf-8")
-            except Exception:
-                pass
+        self._write_cache(cache_file, hydrated_plan)
 
         return hydrated_plan
+
+    @staticmethod
+    def _write_cache(cache_file: Path | None, plan: TriagePlan) -> None:
+        """Best-effort plan persistence; a broken cache must never fail a run."""
+        if cache_file is None:
+            return
+        try:
+            cache_file.write_text(plan.model_dump_json(), encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Could not write triage cache %s: %s", cache_file, exc)
 
     def schedule_time_blocks(
         self,
@@ -690,7 +729,9 @@ class LLMService:
             f"- [{t.id}] {t.content} (duration: {t.duration_minutes or 30}m)"
             for t in selected_tasks
         )
-        block_lines = "\n".join(f"- {b.start} to {b.end}" for b in free_blocks)
+        block_lines = "\n".join(
+            f"- {start} to {end}" for start, end in map(self._block_bounds, free_blocks)
+        )
 
         prompt = (
             f"Mode: {mode.upper()}\n"
@@ -743,7 +784,7 @@ class LLMService:
         total_mins = cls._calculate_free_minutes(free_blocks)
 
         block_lines = (
-            "\n".join(f"- {b.start} to {b.end}" for b in free_blocks)
+            "\n".join(f"- {start} to {end}" for start, end in map(cls._block_bounds, free_blocks))
             or "(no free blocks identified)"
         )
         capacity_str = (

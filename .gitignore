@@ -41,3 +41,6 @@ build/
 dist/
 *.egg-info/
 .eggs/
+
+# Screenshots dropped in the project root
+*.png

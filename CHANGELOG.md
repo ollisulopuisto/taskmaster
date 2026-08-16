@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Calendar Versioning](https://calver.org/) (`vYY.MM.DD.N`).
 
+## [v26.08.16.59] - 2026-08-16
+
+### Fixed
+
+- **llm**: `_calculate_free_minutes` no longer swallows every error. Blocks are read through a shared `_block_bounds` helper that handles both `TimeBlock` objects and dict-shaped blocks (a dict previously parsed as `str(block)` for *both* bounds, silently reporting 0 free capacity), naive/aware datetime mixes are reconciled instead of dropped, and unparseable blocks are logged.
+- **llm**: A cache hit that triggers Pass 2 time-blocking now writes the resulting schedule back to the cache, instead of paying for the Pass-2 LLM call on every subsequent run.
+- **llm**: `_build_prompt`, `_compute_input_hash` and `schedule_time_blocks` accept dict-shaped free blocks (previously `AttributeError` on `b.start`).
+- **todoist**: `Task.project_name` is now actually populated from the projects API (fetched once per ingest, failures logged and tolerated). It was always `None`, so the `[project: …]` prompt enrichment added in v26.08.14.57 never appeared in production.
+- **gcal**: The loopback OAuth server keeps serving until Google's redirect actually arrives. Previously it handled exactly one request, so a favicon probe or prefetch could end the flow with an empty code; `?error=access_denied` is now surfaced verbatim instead of "no authorization code received".
+- **gcal**: The advertised redirect port is the port already bound — the previous bind/close/rebind sequence let another process claim the port in between.
+- **gcal**: `start_local_auth_server` returns a `LocalAuthSession` with a `close()` method; the TUI always closes it (timeout included), so the loopback port and its thread are no longer leaked on every failed attempt.
+- **gcal**: `validate_credentials_static` anchors bare filenames the same way the instance does. Run from another directory it reported "client secrets missing" and aborted the CLI even when the files were present at the project root.
+- **gcal**: `format_event_time` converts to the display timezone (`TIMEZONE`, default Europe/Helsinki), so a UTC `dateTime` no longer renders as UTC wall-clock. Multi-day events show their dates (`14.8. 18:00 → 16.8. 18:00`) instead of collapsing to a single time, and multi-day all-day events show their inclusive span.
+- **tui**: The top bar has an explicit height; the auto-sized grid could overflow a short terminal and paint over the panels below, making buttons unclickable.
+
+### Added
+
+- **cli**: `--mode {balanced,deep_work,admin,low_energy}` and `--time-block` flags.
+- **tui**: Triage-mode selector and a time-block switch in the top bar.
+- **api**: `GET /api/triage/morning` accepts `mode` and `time_block` query parameters.
+- **cli/tui**: The Pass-2 `DailySchedule` is rendered as a time-blocked table. Triage modes and time blocking shipped in v26.08.14.57 but no caller passed either flag, so both were unreachable.
+- **gcal**: `GCalService.format_time_range(start, end)` — one shared range formatter now used by the CLI, TUI and Streamlit UI instead of three copies of `split("T")[-1][:5]`.
+- **models**: `TRIAGE_MODES` tuple as the single source of truth for enumerating modes.
+
 ## [v26.08.14.58] - 2026-08-14
 
 ### Fixed
