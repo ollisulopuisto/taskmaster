@@ -14,7 +14,6 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from dotenv import load_dotenv
 from rich.console import Group
 from rich.table import Table
 from rich.text import Text
@@ -34,12 +33,13 @@ from textual.widgets import (
     TabPane,
 )
 
+from config import load_config
 from models.task import TRIAGE_MODES, TriagePlan
 from services.gcal_service import GCalService
 from services.llm_service import LLMService
 from services.todoist_service import TodoistService
 
-load_dotenv(override=False)
+load_config()
 
 
 def format_duration(seconds: float) -> str:

@@ -7,18 +7,17 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from dotenv import load_dotenv
 from fastapi import APIRouter, FastAPI
 from pydantic import BaseModel
 
+from config import load_config
 from models.task import TriageMode
 from services.gcal_service import GCalService
 from services.llm_service import LLMService
 from services.todoist_service import TodoistService
 
-# Load .env once at import time. `override=False` keeps real environment
-# variables ahead of anything in the file, so CI or shell exports take effect.
-load_dotenv(override=False)
+# Load config from ~/.config/taskmaster/.env and .env
+load_config()
 
 router = APIRouter(prefix="/api/triage", tags=["triage"])
 

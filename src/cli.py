@@ -13,19 +13,19 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from dotenv import load_dotenv
 from rich.columns import Columns
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from config import load_config
 from models.task import TRIAGE_MODES, TriageMode, TriagePlan
 from services.gcal_service import GCalService
 from services.llm_service import LLMService
 from services.todoist_service import TodoistService
 from tui import format_duration, render_time_blocks
 
-load_dotenv(override=False)
+load_config()
 console = Console()
 
 
