@@ -54,6 +54,12 @@ markers = [
     "slow: tests that hit real llama-server (may take 60s+)",
 ]
 
+[tool.uv]
+# Dependabot GHSA-j8f7-rjxc-mr56 (and the other Oct-2026 filelock advisories)
+# are only fixed in filelock 4.x, but litellm pins filelock<4.0. The override
+# forces the fixed major; compatibility evidence is in the PR description.
+override-dependencies = ["filelock>=4.2.1"]
+
 [dependency-groups]
 dev = [
     "playwright>=1.64.1",
