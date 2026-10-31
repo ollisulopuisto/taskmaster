@@ -556,6 +556,32 @@ class TestLanDiscovery:
         assert cfg.model == "qwen2.5:latest"
         assert cfg.key.startswith("auto_lan_192_168_1_50_11434_")
 
+    def test_discover_lan_backends_caches_empty_results_within_ttl(self) -> None:
+        """Empty discovery results (no LAN LLMs found) must be cached within TTL.
+
+        Verifies that when no backends are found, the second call within TTL
+        returns immediately from cache without calling Zeroconf/ServiceBrowser again.
+        """
+        LLMService._lan_cache = None
+        LLMService._lan_cache_expires = 0.0
+
+        with (
+            patch("services.llm_service.Zeroconf") as mock_zc,
+            patch("services.llm_service.ServiceBrowser") as mock_browser,
+            patch("services.llm_service.time.sleep"),
+        ):
+            # First call populates cache with empty dict
+            res1 = LLMService.discover_lan_backends(use_cache=True)
+            assert res1 == {}
+            assert mock_zc.call_count == 1
+            assert mock_browser.call_count == 1
+
+            # Second call must hit cache immediately and not re-initialize Zeroconf
+            res2 = LLMService.discover_lan_backends(use_cache=True)
+            assert res2 == {}
+            assert mock_zc.call_count == 1
+            assert mock_browser.call_count == 1
+
     def test_discover_lan_backends_skips_services_without_llm_api(self) -> None:
         """mDNS services that do not expose an LLM HTTP API are ignored."""
         from services import llm_service as mod
