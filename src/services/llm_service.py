@@ -60,7 +60,7 @@ class LLMService:
     """Talks to any OpenAI-compatible LLM and returns a structured triage plan."""
 
     # TTL-guarded cache of mDNS LAN discovery results (see LAN_CACHE_TTL).
-    _lan_cache: dict[str, LLMBackendConfig] = {}
+    _lan_cache: dict[str, LLMBackendConfig] | None = None
     _lan_cache_expires: float = 0.0
 
     def __init__(
@@ -213,7 +213,10 @@ class LLMService:
             return {}
 
         now = time.monotonic()
-        if use_cache and cls._lan_cache and now < cls._lan_cache_expires:
+        # Optimization: check `is not None` so empty discovery results (no LAN LLMs found)
+        # are cached within TTL instead of falling through truthiness checks and blocking
+        # for browse_seconds (2.0s) on every repeated autodiscovery call.
+        if use_cache and cls._lan_cache is not None and now < cls._lan_cache_expires:
             return dict(cls._lan_cache)
 
         found_names: list[tuple[str, str]] = []

@@ -1,0 +1,3 @@
+## 2026-07-23 - Empty-result cache invalidation pitfall
+**Learning:** Checking cache presence via Python truthiness (`if cls._cache:`) silently disables caching whenever the operation legitimately returns an empty collection (e.g., `dict`, `list`). For operations with high baseline latencies like network discovery (`discover_lan_backends` blocks for 2.0s via mDNS sleep), an empty result evaluated as falsy, forcing every subsequent call within the TTL window to bypass the cache and incur the 2.0s penalty repeatedly.
+**Action:** Always check `is not None` for cached collections instead of relying on truthiness (`if cache:`), ensuring both empty and non-empty results respect the TTL window.
