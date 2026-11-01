@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from models.task import Task as InternalTask
 from services.todoist_service import TodoistService
 
@@ -236,6 +238,71 @@ class TestTodoistService:
             inst.update_task.assert_any_call(
                 task_id="p1", due_date=date(2026, 6, 29), labels=["personal"]
             )
+
+    def test_sync_plan_tags_parallel_execution(self) -> None:
+        """Verify sync_plan_tags executes updates concurrently across multiple worker threads."""
+        import threading
+        import time
+
+        from models.task import TriagePlan
+
+        thread_ids: set[int] = set()
+        lock = threading.Lock()
+
+        def slow_update_task(**kwargs: object) -> None:
+            with lock:
+                thread_ids.add(threading.get_ident())
+            time.sleep(0.04)
+
+        tasks = [
+            InternalTask(id=f"t{i}", content=f"Task {i}", project_id="p1", labels=[])
+            for i in range(8)
+        ]
+        plan = TriagePlan(
+            big=[tasks[0]],
+            medium=tasks[1:4],
+            small=tasks[4:],
+            postponed=[],
+        )
+
+        with patch("services.todoist_service.TodoistAPI") as MockAPI:
+            svc = self._service()
+            MockAPI.return_value.update_task.side_effect = slow_update_task
+
+            t0 = time.perf_counter()
+            svc.sync_plan_tags(plan, tomorrow=date(2026, 6, 29))
+            elapsed = time.perf_counter() - t0
+
+            # 8 tasks * 0.04s sequential = 0.32s; concurrent execution completes under 0.20s
+            assert elapsed < 0.20, (
+                f"sync_plan_tags was too slow ({elapsed:.3f}s), not running concurrently"
+            )
+            assert len(thread_ids) > 1, f"Expected multiple worker threads, got {len(thread_ids)}"
+            assert MockAPI.return_value.update_task.call_count == 8
+
+    def test_sync_plan_tags_propagates_exceptions(self) -> None:
+        """Verify errors during concurrent task updates are raised."""
+        from models.task import TriagePlan
+
+        tasks = [InternalTask(id="err1", content="Task", project_id="p1", labels=[])]
+        plan = TriagePlan(big=[tasks[0]])
+
+        with patch("services.todoist_service.TodoistAPI") as MockAPI:
+            svc = self._service()
+            MockAPI.return_value.update_task.side_effect = RuntimeError("API Rate Limited")
+
+            with pytest.raises(RuntimeError, match="API Rate Limited"):
+                svc.sync_plan_tags(plan, tomorrow=date(2026, 6, 29))
+
+    def test_sync_plan_tags_empty_plan_noop(self) -> None:
+        """Verify sync_plan_tags on an empty plan does not trigger update_task calls."""
+        from models.task import TriagePlan
+
+        plan = TriagePlan()
+        with patch("services.todoist_service.TodoistAPI") as MockAPI:
+            svc = self._service()
+            svc.sync_plan_tags(plan, tomorrow=date(2026, 6, 29))
+            MockAPI.return_value.update_task.assert_not_called()
 
     def test_validate_credentials_valid(self) -> None:
         with patch("services.todoist_service.TodoistAPI") as MockAPI:
