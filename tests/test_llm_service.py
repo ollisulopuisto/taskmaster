@@ -398,6 +398,36 @@ class TestLLMService:
 
         assert discovered == {}
 
+    def test_discover_local_backends_parallel_execution(self) -> None:
+        """Verify discover_local_backends probes target ports concurrently across workers."""
+        import threading
+        import time
+
+        thread_ids: set[int] = set()
+        lock = threading.Lock()
+
+        def slow_get(url: str, **kwargs: object) -> MagicMock:
+            with lock:
+                thread_ids.add(threading.get_ident())
+            time.sleep(0.05)
+            res = MagicMock()
+            res.status_code = 404
+            res.json.return_value = {}
+            return res
+
+        ports = [8000, 11434, 1234, 9000, 9001]
+        with patch("httpx.Client.get", side_effect=slow_get):
+            t0 = time.perf_counter()
+            discovered = LLMService.discover_local_backends(target_ports=ports)
+            elapsed = time.perf_counter() - t0
+
+        assert discovered == {}
+        # 5 ports * 2 endpoints * 0.05s serial = 0.50s; concurrent port probing finishes under 0.25s
+        assert elapsed < 0.30, (
+            f"discover_local_backends was too slow ({elapsed:.3f}s), not concurrent"
+        )
+        assert len(thread_ids) > 1, f"Expected multiple worker threads, got {len(thread_ids)}"
+
     def test_get_available_backends_with_autodiscover(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
