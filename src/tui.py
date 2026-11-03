@@ -791,8 +791,8 @@ class TaskMasterApp(App):
         tomorrow = datetime.now().date() + timedelta(days=1)
         evening_text.update("[dim]Rolling over tasks in Todoist...[/dim]")
         try:
-            for task in self.all_tasks:
-                await asyncio.to_thread(todoist.postpone_task, task.id, tomorrow)
+            task_ids = [task.id for task in self.all_tasks]
+            await asyncio.to_thread(todoist.postpone_tasks, task_ids, tomorrow)
 
             evening_text.update(
                 f"[bold green]✔ Debrief logged. {len(self.all_tasks)} "

@@ -215,6 +215,44 @@ class TestTodoistService:
             task_id="abc-123", due_date=date(2026, 7, 1)
         )
 
+    def test_postpone_tasks_concurrent_execution(self) -> None:
+        """Verify postpone_tasks executes task postponement concurrently across worker threads."""
+        import threading
+        import time
+        from datetime import date
+
+        thread_ids: set[int] = set()
+        lock = threading.Lock()
+
+        def slow_update_task(**kwargs: object) -> None:
+            with lock:
+                thread_ids.add(threading.get_ident())
+            time.sleep(0.04)
+
+        task_ids = [f"task_{i}" for i in range(8)]
+        with patch("services.todoist_service.TodoistAPI") as MockAPI:
+            svc = self._service()
+            MockAPI.return_value.update_task.side_effect = slow_update_task
+
+            t0 = time.perf_counter()
+            svc.postpone_tasks(task_ids, date(2026, 6, 29))
+            elapsed = time.perf_counter() - t0
+
+            # 8 tasks * 0.04s sequential = 0.32s; concurrent execution completes under 0.20s
+            assert elapsed < 0.20, (
+                f"postpone_tasks was too slow ({elapsed:.3f}s), not running concurrently"
+            )
+            assert len(thread_ids) > 1, f"Expected multiple worker threads, got {len(thread_ids)}"
+            assert MockAPI.return_value.update_task.call_count == 8
+
+    def test_postpone_tasks_empty_list_noop(self) -> None:
+        from datetime import date
+
+        with patch("services.todoist_service.TodoistAPI") as MockAPI:
+            svc = self._service()
+            svc.postpone_tasks([], date(2026, 6, 29))
+            MockAPI.return_value.update_task.assert_not_called()
+
     def test_sync_plan_tags_updates_todoist(self) -> None:
         from models.task import TriagePlan
 
