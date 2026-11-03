@@ -1,3 +1,7 @@
+## 2026-11-03 - Thread-safety limitations in googleapiclient
+**Learning:** `googleapiclient.discovery.Resource` and its underlying `httplib2.Http` transport are not thread-safe. Attempting to parallelize API calls across calendars or events by executing methods on a shared `Resource` instance concurrently across worker threads causes race conditions on SSL/socket buffers (e.g. `ssl.SSLError: [SSL: DECRYPTION_FAILED_OR_BAD_RECORD_MAC]`). In contrast, API clients backed by thread-safe HTTP clients (such as `httpx.Client` in `todoist_api_python`) can safely execute requests across a `ThreadPoolExecutor`.
+**Action:** Never parallelize calls on a shared `googleapiclient` Resource object across threads without isolated per-thread HTTP transports or clients.
+
 ## 2026-07-23 - Empty-result cache invalidation pitfall
 **Learning:** Checking cache presence via Python truthiness (`if cls._cache:`) silently disables caching whenever the operation legitimately returns an empty collection (e.g., `dict`, `list`). For operations with high baseline latencies like network discovery (`discover_lan_backends` blocks for 2.0s via mDNS sleep), an empty result evaluated as falsy, forcing every subsequent call within the TTL window to bypass the cache and incur the 2.0s penalty repeatedly.
 **Action:** Always check `is not None` for cached collections instead of relying on truthiness (`if cache:`), ensuring both empty and non-empty results respect the TTL window.
