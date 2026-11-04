@@ -253,6 +253,51 @@ class TestTodoistService:
             svc.postpone_tasks([], date(2026, 6, 29))
             MockAPI.return_value.update_task.assert_not_called()
 
+    def test_complete_tasks_executes_api_complete_task(self) -> None:
+        with patch("services.todoist_service.TodoistAPI") as MockAPI:
+            svc = self._service()
+            svc.complete_tasks(["task_1", "task_2"])
+
+            inst = MockAPI.return_value
+            inst.complete_task.assert_any_call(task_id="task_1")
+            inst.complete_task.assert_any_call(task_id="task_2")
+            assert inst.complete_task.call_count == 2
+
+    def test_complete_tasks_concurrent_execution(self) -> None:
+        """Verify complete_tasks executes task completion concurrently across worker threads."""
+        import threading
+        import time
+
+        thread_ids: set[int] = set()
+        lock = threading.Lock()
+
+        def slow_complete_task(task_id: str) -> None:
+            with lock:
+                thread_ids.add(threading.get_ident())
+            time.sleep(0.04)
+
+        task_ids = [f"task_{i}" for i in range(8)]
+        with patch("services.todoist_service.TodoistAPI") as MockAPI:
+            svc = self._service()
+            MockAPI.return_value.complete_task.side_effect = slow_complete_task
+
+            t0 = time.perf_counter()
+            svc.complete_tasks(task_ids)
+            elapsed = time.perf_counter() - t0
+
+            # 8 tasks * 0.04s sequential = 0.32s; concurrent execution completes under 0.20s
+            assert elapsed < 0.20, (
+                f"complete_tasks was too slow ({elapsed:.3f}s), not running concurrently"
+            )
+            assert len(thread_ids) > 1, f"Expected multiple worker threads, got {len(thread_ids)}"
+            assert MockAPI.return_value.complete_task.call_count == 8
+
+    def test_complete_tasks_empty_list_noop(self) -> None:
+        with patch("services.todoist_service.TodoistAPI") as MockAPI:
+            svc = self._service()
+            svc.complete_tasks([])
+            MockAPI.return_value.complete_task.assert_not_called()
+
     def test_sync_plan_tags_updates_todoist(self) -> None:
         from models.task import TriagePlan
 
