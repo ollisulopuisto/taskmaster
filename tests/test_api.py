@@ -225,7 +225,8 @@ class TestEveningEndpoint:
                 json={"completed_ids": ["1", "2"], "rolled_over_ids": []},
             )
 
-        assert svc.complete_task.call_count == 2
+        assert svc.complete_tasks.call_count == 1
+        assert svc.complete_tasks.call_args[0][0] == ["1", "2"]
 
     def test_evening_validates_empty_body(self, client: TestClient) -> None:
         with (
@@ -240,7 +241,7 @@ class TestEveningEndpoint:
         assert body["rolled_over_count"] == 0
 
     def test_evening_calls_postpone_for_each_rolled_over(self, client: TestClient) -> None:
-        """Every rolled-over task triggers postpone_task."""
+        """Every rolled-over task triggers postpone_tasks."""
         with (
             patch("api.router.TodoistService") as MockTodoist,
             patch("api.router.GCalService"),
@@ -252,22 +253,24 @@ class TestEveningEndpoint:
                 json={"completed_ids": [], "rolled_over_ids": ["1", "2"]},
             )
 
-        assert svc.postpone_task.call_count == 2
-        ids_called = {call.args[0] for call in svc.postpone_task.call_args_list}
-        assert ids_called == {"1", "2"}
+        assert svc.postpone_tasks.call_count == 1
+        assert svc.postpone_tasks.call_args[0][0] == ["1", "2"]
 
     def test_evening_calls_postpone_with_tomorrow_date(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The date passed to postpone_task should be tomorrow."""
-        from datetime import date, timedelta
+        """The date passed to postpone_tasks should be tomorrow."""
+        import os
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
 
-        called_with: list[date] = []
+        called_with: list[object] = []
 
-        def fake_postpone(task_id: str, new_date: date) -> None:
+        def fake_postpone(task_ids: list[str], new_date: object) -> None:
             called_with.append(new_date)
 
-        tomorrow = date.today() + timedelta(days=1)
+        tz = ZoneInfo(os.getenv("TIMEZONE", "Europe/Helsinki"))
+        tomorrow = (datetime.now(tz=tz) + timedelta(days=1)).date()
 
         with (
             patch("api.router.TodoistService") as MockTodoist,
@@ -275,14 +278,15 @@ class TestEveningEndpoint:
             patch("api.router.LLMService"),
         ):
             svc = MockTodoist.return_value
-            svc.postpone_task.side_effect = fake_postpone
+            svc.postpone_tasks.side_effect = fake_postpone
             client.post(
                 "/api/triage/evening",
                 json={"completed_ids": ["42"], "rolled_over_ids": ["1"]},
             )
 
         assert called_with == [tomorrow]
-        assert svc.complete_task.call_count == 1
+        assert svc.complete_tasks.call_count == 1
+        assert svc.complete_tasks.call_args[0][0] == ["42"]
 
 
 class TestTriageModeParameters:
