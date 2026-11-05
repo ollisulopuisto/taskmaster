@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from datetime import UTC, date, datetime
 from unittest.mock import MagicMock, patch
 
@@ -150,6 +152,46 @@ class TestTodoistService:
             result = self._service().get_todays_tasks()
 
         assert [t.id for t in result] == ["1", "2"]
+
+    def test_get_todays_tasks_concurrent_fetching(self) -> None:
+        """Verify get_todays_tasks fetches project names and tasks concurrently."""
+        thread_ids: set[int] = set()
+        lock = threading.Lock()
+
+        def slow_get_projects() -> list[object]:
+            with lock:
+                thread_ids.add(threading.get_ident())
+            time.sleep(0.05)
+            proj = MagicMock()
+            proj.id = "proj-1"
+            proj.name = "Work"
+            return [proj]
+
+        def slow_get_tasks() -> object:
+            with lock:
+                thread_ids.add(threading.get_ident())
+            time.sleep(0.05)
+            task = _make_todoist_task(
+                id="1", content="Task 1", project_id="proj-1", due_date="2026-06-28"
+            )
+            return iter([[task]])
+
+        with patch("services.todoist_service.TodoistAPI") as MockAPI:
+            instance = MockAPI.return_value
+            instance.get_projects.side_effect = slow_get_projects
+            instance.get_tasks.side_effect = slow_get_tasks
+
+            t0 = time.perf_counter()
+            result = self._service().get_todays_tasks()
+            elapsed = time.perf_counter() - t0
+
+            # 2 calls * 0.05s sequential = 0.10s; concurrent execution finishes well under 0.09s
+            assert elapsed < 0.09, (
+                f"get_todays_tasks was too slow ({elapsed:.3f}s), not running concurrently"
+            )
+            assert len(thread_ids) > 1, f"Expected multiple worker threads, got {len(thread_ids)}"
+            assert len(result) == 1
+            assert result[0].project_name == "Work"
 
     def test_get_todays_tasks_excludes_locked_tasks_default_labels(self) -> None:
         normal = _make_todoist_task(id="1", content="Normal task", labels=["work"])
