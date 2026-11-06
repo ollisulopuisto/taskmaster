@@ -195,6 +195,111 @@ class TestMorningEndpoint:
             {"start": "2026-06-28T08:00:00+00:00", "end": "2026-06-28T09:00:00+00:00"}
         ]
 
+    def test_morning_fetches_todoist_and_gcal_concurrently(self, client: TestClient) -> None:
+        """Verify morning_triage fetches Todoist tasks and GCal data concurrently."""
+        import threading
+        import time
+
+        thread_ids: set[int] = set()
+        lock = threading.Lock()
+
+        def slow_get_tasks() -> list[object]:
+            with lock:
+                thread_ids.add(threading.get_ident())
+            time.sleep(0.05)
+            return []
+
+        def slow_get_events() -> list[object]:
+            with lock:
+                thread_ids.add(threading.get_ident())
+            time.sleep(0.05)
+            return []
+
+        with (
+            patch("api.router.TodoistService") as MockTodoist,
+            patch("api.router.GCalService") as MockGCal,
+            patch("api.router.LLMService") as MockLLM,
+        ):
+            MockLLM.from_env.return_value = MockLLM.return_value
+            MockTodoist.return_value.get_todays_tasks.side_effect = slow_get_tasks
+            MockGCal.return_value.get_todays_events.side_effect = slow_get_events
+            MockGCal.return_value.get_free_time_blocks.return_value = []
+            MockLLM.return_value.plan_triage.return_value = TriagePlan()
+
+            t0 = time.perf_counter()
+            response = client.get("/api/triage/morning")
+            elapsed = time.perf_counter() - t0
+
+        assert response.status_code == 200
+        # Sequential: 0.05 + 0.05 = 0.10s. Concurrently: max(0.05, 0.05) ~= 0.05s (< 0.09s).
+        assert elapsed < 0.09, f"morning_triage took {elapsed:.3f}s, expected concurrent execution"
+        assert len(thread_ids) > 1, f"Expected multiple worker threads, got {len(thread_ids)}"
+
+
+class TestDebugEndpoint:
+    def test_debug_returns_raw_data(self, client: TestClient) -> None:
+        from models.task import Task, TimeBlock
+
+        tasks = [Task(id="1", content="Task 1", project_id="proj-1", due_date=date(2026, 6, 28))]
+        events = [{"id": "ev1", "summary": "Meeting", "start": {}, "end": {}}]
+        blocks = [TimeBlock(start="2026-06-28T09:00:00+00:00", end="2026-06-28T10:00:00+00:00")]
+
+        with (
+            patch("api.router.TodoistService") as MockTodoist,
+            patch("api.router.GCalService") as MockGCal,
+            patch("api.router.LLMService") as MockLLM,
+        ):
+            MockLLM.from_env.return_value = MockLLM.return_value
+            MockTodoist.return_value.get_todays_tasks.return_value = tasks
+            MockGCal.return_value.get_todays_events.return_value = events
+            MockGCal.return_value.get_free_time_blocks.return_value = blocks
+
+            response = client.get("/api/triage/debug")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["todoist"]["task_count"] == 1
+        assert data["gcal"]["event_count"] == 1
+        assert data["gcal"]["free_block_count"] == 1
+
+    def test_debug_fetches_todoist_and_gcal_concurrently(self, client: TestClient) -> None:
+        """Verify debug_triage fetches Todoist tasks and GCal data concurrently."""
+        import threading
+        import time
+
+        thread_ids: set[int] = set()
+        lock = threading.Lock()
+
+        def slow_get_tasks() -> list[object]:
+            with lock:
+                thread_ids.add(threading.get_ident())
+            time.sleep(0.05)
+            return []
+
+        def slow_get_events() -> list[object]:
+            with lock:
+                thread_ids.add(threading.get_ident())
+            time.sleep(0.05)
+            return []
+
+        with (
+            patch("api.router.TodoistService") as MockTodoist,
+            patch("api.router.GCalService") as MockGCal,
+            patch("api.router.LLMService") as MockLLM,
+        ):
+            MockLLM.from_env.return_value = MockLLM.return_value
+            MockTodoist.return_value.get_todays_tasks.side_effect = slow_get_tasks
+            MockGCal.return_value.get_todays_events.side_effect = slow_get_events
+            MockGCal.return_value.get_free_time_blocks.return_value = []
+
+            t0 = time.perf_counter()
+            response = client.get("/api/triage/debug")
+            elapsed = time.perf_counter() - t0
+
+        assert response.status_code == 200
+        assert elapsed < 0.09, f"debug_triage took {elapsed:.3f}s, expected concurrent execution"
+        assert len(thread_ids) > 1, f"Expected multiple worker threads, got {len(thread_ids)}"
+
 
 class TestEveningEndpoint:
     def test_evening_accepts_completed_tasks(self, client: TestClient) -> None:
