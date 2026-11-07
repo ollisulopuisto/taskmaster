@@ -196,6 +196,61 @@ def _cli_mocks(mock_plan, mock_events=None, mock_blocks=None):
     return mock_todoist, mock_gcal, mock_llm
 
 
+def test_cli_fetches_todoist_and_gcal_concurrently():
+    """Verify run_cli fetches Todoist tasks and Google Calendar data concurrently."""
+    import threading
+    import time
+
+    thread_ids: set[int] = set()
+    lock = threading.Lock()
+
+    def slow_get_tasks() -> list[object]:
+        with lock:
+            thread_ids.add(threading.get_ident())
+        time.sleep(0.05)
+        return []
+
+    def slow_get_events() -> list[object]:
+        with lock:
+            thread_ids.add(threading.get_ident())
+        time.sleep(0.05)
+        return []
+
+    mock_plan = TriagePlan()
+    with (
+        patch("cli.TodoistService") as mock_todoist_cls,
+        patch("cli.GCalService") as mock_gcal_cls,
+        patch("cli.LLMService") as mock_llm_cls,
+    ):
+        mock_todoist = MagicMock()
+        mock_todoist.validate_credentials.return_value = (True, "Valid")
+        mock_todoist.get_todays_tasks.side_effect = slow_get_tasks
+        mock_todoist_cls.return_value = mock_todoist
+
+        mock_gcal = MagicMock()
+        mock_gcal.validate_credentials.return_value = (True, "Valid")
+        mock_gcal.get_todays_events.side_effect = slow_get_events
+        mock_gcal.get_free_time_blocks.return_value = []
+        mock_gcal_cls.return_value = mock_gcal
+        mock_gcal_cls.validate_credentials_static.return_value = (True, "Valid")
+        mock_gcal_cls.format_event_time.side_effect = GCalService.format_event_time
+        mock_gcal_cls.format_time_range.side_effect = GCalService.format_time_range
+
+        mock_llm = MagicMock()
+        mock_llm.plan_triage.return_value = mock_plan
+        mock_llm_cls.from_env.return_value = mock_llm
+        mock_llm_cls.validate_backend.return_value = (True, "Valid")
+
+        t0 = time.perf_counter()
+        plan = run_cli(auto=True)
+        elapsed = time.perf_counter() - t0
+
+    assert plan == mock_plan
+    # Sequential: 0.05 + 0.05 = 0.10s. Concurrent: max(0.05, 0.05) ~= 0.05s (< 0.09s).
+    assert elapsed < 0.09, f"run_cli took {elapsed:.3f}s, expected concurrent execution"
+    assert len(thread_ids) > 1, f"Expected multiple worker threads, got {len(thread_ids)}"
+
+
 def test_cli_passes_mode_and_time_block_to_llm():
     """--mode / --time-block must reach plan_triage, otherwise the feature is dead."""
     task = Task(id="t1", content="Big task", project_id="p1", due_date=date.today(), priority=4)
