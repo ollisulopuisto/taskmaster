@@ -486,3 +486,97 @@ async def test_tui_auth_gcal_reports_denied_consent(mock_services):
     assert "access_denied" in text
     mock_gcal.complete_auth.assert_not_called()
     session.close.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_tui_action_generate_plan_parallel_ingest(mock_services):
+    """Verify that Todoist and GCal ingest are executed concurrently in generate_plan."""
+    import threading
+    import time
+
+    lock = threading.Lock()
+    active_count = 0
+    max_concurrent = 0
+
+    orig_tasks = mock_services["tasks"]
+
+    def slow_td(*args, **kwargs):
+        nonlocal active_count, max_concurrent
+        with lock:
+            active_count += 1
+            if active_count > max_concurrent:
+                max_concurrent = active_count
+        time.sleep(0.1)
+        with lock:
+            active_count -= 1
+        return orig_tasks
+
+    def slow_gc(*args, **kwargs):
+        nonlocal active_count, max_concurrent
+        with lock:
+            active_count += 1
+            if active_count > max_concurrent:
+                max_concurrent = active_count
+        time.sleep(0.1)
+        with lock:
+            active_count -= 1
+        return [{"summary": "Meeting", "start": {"dateTime": "2026-07-22T09:00:00+03:00"}}]
+
+    mock_services["todoist"].get_todays_tasks.side_effect = slow_td
+    mock_services["gcal"].get_todays_events.side_effect = slow_gc
+
+    app = TaskMasterApp()
+    async with app.run_test() as pilot:
+        await pilot.click("#btn-generate-plan")
+        await pilot.pause()
+
+    assert max_concurrent >= 2, f"Expected concurrent execution (max >= 2), got {max_concurrent}"
+
+
+@pytest.mark.anyio
+async def test_tui_action_fetch_debug_parallel_ingest(mock_services):
+    """Verify that Todoist and GCal ingest are executed concurrently in debug fetch."""
+    import threading
+    import time
+
+    lock = threading.Lock()
+    active_count = 0
+    max_concurrent = 0
+
+    orig_tasks = mock_services["tasks"]
+
+    def slow_td(*args, **kwargs):
+        nonlocal active_count, max_concurrent
+        with lock:
+            active_count += 1
+            if active_count > max_concurrent:
+                max_concurrent = active_count
+        time.sleep(0.1)
+        with lock:
+            active_count -= 1
+        return orig_tasks
+
+    def slow_gc(*args, **kwargs):
+        nonlocal active_count, max_concurrent
+        with lock:
+            active_count += 1
+            if active_count > max_concurrent:
+                max_concurrent = active_count
+        time.sleep(0.1)
+        with lock:
+            active_count -= 1
+        return [{"summary": "Meeting", "start": {"dateTime": "2026-07-22T09:00:00+03:00"}}]
+
+    mock_services["todoist"].get_todays_tasks.side_effect = slow_td
+    mock_services["gcal"].get_todays_events.side_effect = slow_gc
+
+    app = TaskMasterApp()
+    async with app.run_test() as pilot:
+        tabs = app.query_one(TabbedContent)
+        tabs.active = "tab-debug"
+        await pilot.pause()
+
+        await pilot.click("#btn-fetch-debug")
+        await pilot.pause()
+
+    assert max_concurrent >= 2, f"Expected concurrent execution (max >= 2), got {max_concurrent}"
