@@ -453,15 +453,15 @@ class TestLLMService:
     def test_get_available_backends_autodiscover_concurrent_execution(self) -> None:
         """Verify autodiscover probes local ports and LAN mDNS concurrently across workers."""
         import threading
-        import time
 
-        thread_ids: set[int] = set()
-        lock = threading.Lock()
+        # Both discovery functions rendezvous on a 2-party barrier. If they ran
+        # sequentially, the first call would block here until the timeout and the
+        # test would fail, so completing the rendezvous proves real overlap.
+        # The timeout is generous so loaded CI workers cannot flake the test.
+        rendezvous = threading.Barrier(2)
 
         def slow_local() -> dict[str, LLMBackendConfig]:
-            with lock:
-                thread_ids.add(threading.get_ident())
-            time.sleep(0.06)
+            rendezvous.wait(timeout=30)
             return {
                 "auto_8000_local": LLMBackendConfig(
                     key="auto_8000_local",
@@ -472,9 +472,7 @@ class TestLLMService:
             }
 
         def slow_lan() -> dict[str, LLMBackendConfig]:
-            with lock:
-                thread_ids.add(threading.get_ident())
-            time.sleep(0.06)
+            rendezvous.wait(timeout=30)
             return {
                 "auto_lan_remote": LLMBackendConfig(
                     key="auto_lan_remote",
@@ -488,17 +486,10 @@ class TestLLMService:
             patch.object(LLMService, "discover_local_backends", side_effect=slow_local),
             patch.object(LLMService, "discover_lan_backends", side_effect=slow_lan),
         ):
-            t0 = time.perf_counter()
             backends = LLMService.get_available_backends(autodiscover=True)
-            elapsed = time.perf_counter() - t0
 
         assert "auto_8000_local" in backends
         assert "auto_lan_remote" in backends
-        # 2 calls * 0.06s sequential = 0.12s; concurrent execution finishes well under 0.10s
-        assert elapsed < 0.10, (
-            f"Autodiscover was too slow ({elapsed:.3f}s), not running concurrently"
-        )
-        assert len(thread_ids) > 1, f"Expected multiple worker threads, got {len(thread_ids)}"
 
     def test_validate_backend_success(self) -> None:
         cfg = LLMBackendConfig(
