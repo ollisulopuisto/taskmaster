@@ -450,6 +450,47 @@ class TestLLMService:
         assert "local" in backends
         assert "auto_11434_ollama" in backends
 
+    def test_get_available_backends_autodiscover_concurrent_execution(self) -> None:
+        """Verify autodiscover probes local ports and LAN mDNS concurrently across workers."""
+        import threading
+
+        # Both discovery functions rendezvous on a 2-party barrier. If they ran
+        # sequentially, the first call would block here until the timeout and the
+        # test would fail, so completing the rendezvous proves real overlap.
+        # The timeout is generous so loaded CI workers cannot flake the test.
+        rendezvous = threading.Barrier(2)
+
+        def slow_local() -> dict[str, LLMBackendConfig]:
+            rendezvous.wait(timeout=30)
+            return {
+                "auto_8000_local": LLMBackendConfig(
+                    key="auto_8000_local",
+                    name="Local Model",
+                    base_url="http://localhost:8000/v1",
+                    model="local-model",
+                )
+            }
+
+        def slow_lan() -> dict[str, LLMBackendConfig]:
+            rendezvous.wait(timeout=30)
+            return {
+                "auto_lan_remote": LLMBackendConfig(
+                    key="auto_lan_remote",
+                    name="LAN Model",
+                    base_url="http://192.168.1.100:11434/v1",
+                    model="lan-model",
+                )
+            }
+
+        with (
+            patch.object(LLMService, "discover_local_backends", side_effect=slow_local),
+            patch.object(LLMService, "discover_lan_backends", side_effect=slow_lan),
+        ):
+            backends = LLMService.get_available_backends(autodiscover=True)
+
+        assert "auto_8000_local" in backends
+        assert "auto_lan_remote" in backends
+
     def test_validate_backend_success(self) -> None:
         cfg = LLMBackendConfig(
             key="test", name="Test LLM", base_url="http://localhost:8000/v1", model="test"
