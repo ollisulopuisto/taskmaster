@@ -484,6 +484,63 @@ class TestTodoistService:
             inst.update_task.assert_any_call(task_id="b2", labels=["work", "big"])
             inst.update_task.assert_any_call(task_id="p2", labels=[], due_date=tomorrow)
 
+    def test_sync_plan_tags_uses_fresh_remote_state_for_skip_check(self) -> None:
+        """Regression (Devin on #31): a tag changed in Todoist after ingestion
+        must not escape the sync even when the snapshot already matches the plan."""
+        from types import SimpleNamespace
+
+        from models.task import TriagePlan
+
+        tomorrow = date(2026, 6, 29)
+        # Snapshot says the task already has "big", but the user removed it remotely.
+        t_big = InternalTask(id="b1", content="Big", project_id="p1", labels=["work", "big"])
+        plan = TriagePlan(big=[t_big], medium=[], small=[], postponed=[])
+
+        with patch("services.todoist_service.TodoistAPI") as MockAPI:
+            svc = self._service()
+            inst = MockAPI.return_value
+            inst.get_task.return_value = SimpleNamespace(labels=["work"], due=None)
+
+            svc.sync_plan_tags(plan, tomorrow=tomorrow)
+
+            inst.update_task.assert_called_once_with(task_id="b1", labels=["work", "big"])
+
+    def test_sync_plan_tags_skips_when_fresh_state_matches(self) -> None:
+        """When the freshly fetched remote state already matches, no update is sent."""
+        from types import SimpleNamespace
+
+        from models.task import TriagePlan
+
+        tomorrow = date(2026, 6, 29)
+        t_big = InternalTask(id="b1", content="Big", project_id="p1", labels=["work"])
+        plan = TriagePlan(big=[t_big], medium=[], small=[], postponed=[])
+
+        with patch("services.todoist_service.TodoistAPI") as MockAPI:
+            svc = self._service()
+            inst = MockAPI.return_value
+            inst.get_task.return_value = SimpleNamespace(labels=["work", "big"], due=None)
+
+            svc.sync_plan_tags(plan, tomorrow=tomorrow)
+
+            inst.update_task.assert_not_called()
+
+    def test_sync_plan_tags_falls_back_to_snapshot_when_fetch_fails(self) -> None:
+        """A failed get_task falls back to the snapshot, preserving prior behavior."""
+        from models.task import TriagePlan
+
+        tomorrow = date(2026, 6, 29)
+        t_big = InternalTask(id="b1", content="Big", project_id="p1", labels=["work"])
+        plan = TriagePlan(big=[t_big], medium=[], small=[], postponed=[])
+
+        with patch("services.todoist_service.TodoistAPI") as MockAPI:
+            svc = self._service()
+            inst = MockAPI.return_value
+            inst.get_task.side_effect = RuntimeError("network down")
+
+            svc.sync_plan_tags(plan, tomorrow=tomorrow)
+
+            inst.update_task.assert_called_once_with(task_id="b1", labels=["work", "big"])
+
     def test_validate_credentials_valid(self) -> None:
         with patch("services.todoist_service.TodoistAPI") as MockAPI:
             inst = MockAPI.return_value
