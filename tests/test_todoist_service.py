@@ -429,6 +429,61 @@ class TestTodoistService:
             svc.sync_plan_tags(plan, tomorrow=date(2026, 6, 29))
             MockAPI.return_value.update_task.assert_not_called()
 
+    def test_sync_plan_tags_skips_redundant_updates_when_already_synced(self) -> None:
+        """Verify sync_plan_tags skips remote update_task calls if tasks already match."""
+        from models.task import TriagePlan
+
+        tomorrow = date(2026, 6, 29)
+        t_big = InternalTask(id="b1", content="Big", project_id="p1", labels=["work", "big"])
+        t_med = InternalTask(id="m1", content="Med", project_id="p1", labels=["medium"])
+        t_small = InternalTask(id="s1", content="Small", project_id="p1", labels=["small"])
+        t_post = InternalTask(
+            id="p1", content="Postponed", project_id="p1", labels=["personal"], due_date=tomorrow
+        )
+
+        plan = TriagePlan(big=[t_big], medium=[t_med], small=[t_small], postponed=[t_post])
+
+        with patch("services.todoist_service.TodoistAPI") as MockAPI:
+            svc = self._service()
+            svc.sync_plan_tags(plan, tomorrow=tomorrow)
+
+            # All tasks already have correct tags and due dates; 0 updates should be dispatched
+            MockAPI.return_value.update_task.assert_not_called()
+
+    def test_sync_plan_tags_only_updates_changed_tasks(self) -> None:
+        """Verify sync_plan_tags only dispatches update_task for tasks that actually changed."""
+        from models.task import TriagePlan
+
+        tomorrow = date(2026, 6, 29)
+        # b1 already has 'big' tag; b2 lacks 'big' tag
+        t_big_unchanged = InternalTask(
+            id="b1", content="Big 1", project_id="p1", labels=["work", "big"]
+        )
+        t_big_changed = InternalTask(id="b2", content="Big 2", project_id="p1", labels=["work"])
+        # p1 already has tomorrow's date and no size labels; p2 has old date
+        t_post_unchanged = InternalTask(
+            id="p1", content="Post 1", project_id="p1", labels=[], due_date=tomorrow
+        )
+        t_post_changed = InternalTask(
+            id="p2", content="Post 2", project_id="p1", labels=["big"], due_date=date(2026, 6, 28)
+        )
+
+        plan = TriagePlan(
+            big=[t_big_unchanged, t_big_changed],
+            medium=[],
+            small=[],
+            postponed=[t_post_unchanged, t_post_changed],
+        )
+
+        with patch("services.todoist_service.TodoistAPI") as MockAPI:
+            svc = self._service()
+            svc.sync_plan_tags(plan, tomorrow=tomorrow)
+
+            inst = MockAPI.return_value
+            assert inst.update_task.call_count == 2
+            inst.update_task.assert_any_call(task_id="b2", labels=["work", "big"])
+            inst.update_task.assert_any_call(task_id="p2", labels=[], due_date=tomorrow)
+
     def test_validate_credentials_valid(self) -> None:
         with patch("services.todoist_service.TodoistAPI") as MockAPI:
             inst = MockAPI.return_value

@@ -203,15 +203,28 @@ class TodoistService:
         # Optimization: Parallelize remote Todoist API update calls across a worker pool
         # rather than performing N serial HTTP round trips. For a typical plan of 15-25 tasks,
         # this reduces sync wall-clock latency by ~85% (from ~3.0s down to ~0.45s).
+        # Furthermore, skip redundant updates if the task already has the target tags and due date.
+        # For re-syncs or pre-tagged tasks, this eliminates 100% of unnecessary remote HTTP calls
+        # (e.g. from ~15-25 calls down to 0, saving ~400-500ms and avoiding rate limits).
         updates: list[tuple[str, dict[str, Any]]] = []
         for t in plan.big:
-            updates.append((t.id, {"labels": _clean_and_tag(t.labels, "big")}))
+            new_labels = _clean_and_tag(t.labels, "big")
+            if set(t.labels) != set(new_labels):
+                updates.append((t.id, {"labels": new_labels}))
         for t in plan.medium:
-            updates.append((t.id, {"labels": _clean_and_tag(t.labels, "medium")}))
+            new_labels = _clean_and_tag(t.labels, "medium")
+            if set(t.labels) != set(new_labels):
+                updates.append((t.id, {"labels": new_labels}))
         for t in plan.small:
-            updates.append((t.id, {"labels": _clean_and_tag(t.labels, "small")}))
+            new_labels = _clean_and_tag(t.labels, "small")
+            if set(t.labels) != set(new_labels):
+                updates.append((t.id, {"labels": new_labels}))
         for t in plan.postponed:
-            updates.append((t.id, {"labels": _clean_and_tag(t.labels, None), "due_date": tomorrow}))
+            new_labels = _clean_and_tag(t.labels, None)
+            labels_changed = set(t.labels) != set(new_labels)
+            date_changed = t.due_date != tomorrow
+            if labels_changed or date_changed:
+                updates.append((t.id, {"labels": new_labels, "due_date": tomorrow}))
 
         if not updates:
             return
