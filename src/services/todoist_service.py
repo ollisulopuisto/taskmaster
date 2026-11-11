@@ -257,6 +257,24 @@ class TodoistService:
         ids = list(dict.fromkeys(task_ids))
         if not ids:
             return states
+        # Bulk fetch: one request per page instead of one per task. A 25-task
+        # re-sync cost 25 get_task calls even when everything matched (Devin
+        # finding on #32); get_tasks(ids=...) returns the same state in one
+        # request for a typical plan.
+        try:
+            for page in self._api.get_tasks(ids=ids):
+                for raw in page:
+                    labels = raw.labels
+                    due = raw.due
+                    states[raw.id] = (
+                        list(labels) if labels else [],
+                        self._parse_date(due.date) if due else None,
+                    )
+            return states
+        except Exception:
+            pass
+        # Bulk fetch failed; fall back to per-task fetches so one bad page
+        # does not send every task back to the ingestion snapshot.
         with ThreadPoolExecutor(max_workers=min(len(ids), 8)) as pool:
             futures = {pool.submit(self._api.get_task, tid): tid for tid in ids}
             for future, tid in futures.items():

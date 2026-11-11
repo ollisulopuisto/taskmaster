@@ -450,6 +450,36 @@ class TestTodoistService:
             # All tasks already have correct tags and due dates; 0 updates should be dispatched
             MockAPI.return_value.update_task.assert_not_called()
 
+    def test_sync_plan_tags_fetches_fresh_state_in_bulk(self) -> None:
+        """A 25-task re-sync must not cost 25 get_task calls (Devin on #32).
+
+        The fresh-state check exists to catch tags edited in Todoist after
+        ingestion, but fetching one task per request makes a no-op re-sync
+        as expensive as a full one. The client's get_tasks(ids=[...]) returns
+        the same state in a single request.
+        """
+        from types import SimpleNamespace
+
+        from models.task import TriagePlan
+
+        tasks = [
+            InternalTask(id=f"t{i}", content=f"Task {i}", project_id="p1", labels=["big"])
+            for i in range(25)
+        ]
+        plan = TriagePlan(big=tasks, medium=[], small=[], postponed=[])
+
+        with patch("services.todoist_service.TodoistAPI") as MockAPI:
+            inst = MockAPI.return_value
+            inst.get_tasks.return_value = iter(
+                [[SimpleNamespace(id=t.id, labels=["big"], due=None) for t in tasks]]
+            )
+            svc = self._service()
+            svc.sync_plan_tags(plan, tomorrow=date(2026, 6, 29))
+
+            inst.get_task.assert_not_called()
+            assert inst.get_tasks.call_count == 1
+            inst.update_task.assert_not_called()
+
     def test_sync_plan_tags_only_updates_changed_tasks(self) -> None:
         """Verify sync_plan_tags only dispatches update_task for tasks that actually changed."""
         from models.task import TriagePlan
@@ -499,7 +529,9 @@ class TestTodoistService:
         with patch("services.todoist_service.TodoistAPI") as MockAPI:
             svc = self._service()
             inst = MockAPI.return_value
-            inst.get_task.return_value = SimpleNamespace(labels=["work"], due=None)
+            inst.get_tasks.return_value = iter(
+                [[SimpleNamespace(id="b1", labels=["work"], due=None)]]
+            )
 
             svc.sync_plan_tags(plan, tomorrow=tomorrow)
 
@@ -518,14 +550,16 @@ class TestTodoistService:
         with patch("services.todoist_service.TodoistAPI") as MockAPI:
             svc = self._service()
             inst = MockAPI.return_value
-            inst.get_task.return_value = SimpleNamespace(labels=["work", "big"], due=None)
+            inst.get_tasks.return_value = iter(
+                [[SimpleNamespace(id="b1", labels=["work", "big"], due=None)]]
+            )
 
             svc.sync_plan_tags(plan, tomorrow=tomorrow)
 
             inst.update_task.assert_not_called()
 
     def test_sync_plan_tags_falls_back_to_snapshot_when_fetch_fails(self) -> None:
-        """A failed get_task falls back to the snapshot, preserving prior behavior."""
+        """A failed fetch falls back to the snapshot, preserving prior behavior."""
         from models.task import TriagePlan
 
         tomorrow = date(2026, 6, 29)
@@ -535,6 +569,7 @@ class TestTodoistService:
         with patch("services.todoist_service.TodoistAPI") as MockAPI:
             svc = self._service()
             inst = MockAPI.return_value
+            inst.get_tasks.side_effect = RuntimeError("network down")
             inst.get_task.side_effect = RuntimeError("network down")
 
             svc.sync_plan_tags(plan, tomorrow=tomorrow)
