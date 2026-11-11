@@ -206,25 +206,32 @@ class TodoistService:
         # Furthermore, skip redundant updates if the task already has the target tags and due date.
         # For re-syncs or pre-tagged tasks, this eliminates 100% of unnecessary remote HTTP calls
         # (e.g. from ~15-25 calls down to 0, saving ~400-500ms and avoiding rate limits).
+        #
+        # The skip check must compare against the remote task's CURRENT state,
+        # not the ingestion snapshot: a tag edited in Todoist after ingestion
+        # would otherwise escape the sync (Devin finding on #31). Fetch fresh
+        # state in parallel; on failure, fall back to the snapshot, which
+        # preserves the previous write-based behavior for that task.
+        planned: list[tuple[Any, str | None]] = (
+            [(t, "big") for t in plan.big]
+            + [(t, "medium") for t in plan.medium]
+            + [(t, "small") for t in plan.small]
+            + [(t, None) for t in plan.postponed]
+        )
+        fresh = self._fetch_current_states([t.id for t, _ in planned])
+
         updates: list[tuple[str, dict[str, Any]]] = []
-        for t in plan.big:
-            new_labels = _clean_and_tag(t.labels, "big")
-            if set(t.labels) != set(new_labels):
-                updates.append((t.id, {"labels": new_labels}))
-        for t in plan.medium:
-            new_labels = _clean_and_tag(t.labels, "medium")
-            if set(t.labels) != set(new_labels):
-                updates.append((t.id, {"labels": new_labels}))
-        for t in plan.small:
-            new_labels = _clean_and_tag(t.labels, "small")
-            if set(t.labels) != set(new_labels):
-                updates.append((t.id, {"labels": new_labels}))
-        for t in plan.postponed:
-            new_labels = _clean_and_tag(t.labels, None)
-            labels_changed = set(t.labels) != set(new_labels)
-            date_changed = t.due_date != tomorrow
-            if labels_changed or date_changed:
-                updates.append((t.id, {"labels": new_labels, "due_date": tomorrow}))
+        for t, tag in planned:
+            current_labels, current_due = fresh.get(t.id, (t.labels, t.due_date))
+            new_labels = _clean_and_tag(list(current_labels), tag)
+            labels_changed = set(current_labels) != set(new_labels)
+            if tag is not None:
+                if labels_changed:
+                    updates.append((t.id, {"labels": new_labels}))
+            else:
+                date_changed = current_due != tomorrow
+                if labels_changed or date_changed:
+                    updates.append((t.id, {"labels": new_labels, "due_date": tomorrow}))
 
         if not updates:
             return
@@ -236,6 +243,52 @@ class TodoistService:
             ]
             for future in futures:
                 future.result()
+
+    def _fetch_current_states(
+        self, task_ids: list[str]
+    ) -> dict[str, tuple[list[str], date | None]]:
+        """Fetch current labels and due dates for the given tasks, in parallel.
+
+        Used by sync_plan_tags so its skip check compares against the remote
+        task's current state rather than the ingestion snapshot. Tasks whose
+        fetch fails are omitted; callers fall back to the snapshot for those.
+        """
+        states: dict[str, tuple[list[str], date | None]] = {}
+        ids = list(dict.fromkeys(task_ids))
+        if not ids:
+            return states
+        # Bulk fetch: one request per page instead of one per task. A 25-task
+        # re-sync cost 25 get_task calls even when everything matched (Devin
+        # finding on #32); get_tasks(ids=...) returns the same state in one
+        # request for a typical plan.
+        try:
+            for page in self._api.get_tasks(ids=ids):
+                for raw in page:
+                    labels = raw.labels
+                    due = raw.due
+                    states[raw.id] = (
+                        list(labels) if labels else [],
+                        self._parse_date(due.date) if due else None,
+                    )
+            return states
+        except Exception:
+            pass
+        # Bulk fetch failed; fall back to per-task fetches so one bad page
+        # does not send every task back to the ingestion snapshot.
+        with ThreadPoolExecutor(max_workers=min(len(ids), 8)) as pool:
+            futures = {pool.submit(self._api.get_task, tid): tid for tid in ids}
+            for future, tid in futures.items():
+                try:
+                    raw = future.result()
+                    labels = raw.labels
+                    due = raw.due
+                    states[tid] = (
+                        list(labels) if labels else [],
+                        self._parse_date(due.date) if due else None,
+                    )
+                except Exception:
+                    continue
+        return states
 
     def sync_plan_priorities(self, plan: TriagePlan, tomorrow: date) -> None:
         """Deprecated alias for sync_plan_tags."""
