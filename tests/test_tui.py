@@ -258,6 +258,73 @@ async def test_tui_save_settings_button(mock_services):
 
 
 @pytest.mark.anyio
+async def test_tui_save_settings_skips_autodiscover_for_env_backend(mock_services):
+    """Saving settings for an env-configured backend avoids triggering network autodiscovery."""
+    from models.task import LLMBackendConfig
+
+    env_backend = LLMBackendConfig(
+        key="default", name="Default LLM", base_url="http://localhost:8000/v1", model="gemma4"
+    )
+
+    with (
+        patch(
+            "tui.LLMService.get_available_backends", return_value={"default": env_backend}
+        ) as mock_get_backends,
+        patch("tui.LLMService.save_settings_to_env") as mock_save,
+    ):
+        app = TaskMasterApp()
+        async with app.run_test() as pilot:
+            await pilot.click("#btn-save-settings")
+            await pilot.pause()
+
+            mock_save.assert_called_once_with("default", config=env_backend)
+            # Must NOT call autodiscover=True during save
+            for call in mock_get_backends.call_args_list:
+                assert call.kwargs.get("autodiscover") is not True
+
+
+@pytest.mark.anyio
+async def test_tui_save_settings_uses_cached_discovered_backend(mock_services):
+    """Saving a previously discovered backend uses cached config without re-running autodiscover."""
+    from models.task import LLMBackendConfig
+    from textual.widgets import Select
+
+    discovered_backend = LLMBackendConfig(
+        key="auto_11434_llama3",
+        name="⚡ Discovered Ollama (Port 11434): llama3",
+        base_url="http://localhost:11434/v1",
+        model="llama3",
+    )
+
+    with patch(
+        "tui.LLMService.get_available_backends",
+        return_value={"auto_11434_llama3": discovered_backend},
+    ) as mock_get_backends:
+        app = TaskMasterApp()
+        async with app.run_test() as pilot:
+            # 1. Trigger discover LLMs once
+            await pilot.click("#btn-discover-llm")
+            await pilot.pause()
+
+            select_widget = app.query_one("#select-llm-backend", Select)
+            select_widget.value = "auto_11434_llama3"
+            await pilot.pause()
+
+            # Reset call count before clicking save
+            mock_get_backends.reset_mock()
+
+            with patch("tui.LLMService.save_settings_to_env") as mock_save:
+                await pilot.click("#btn-save-settings")
+                await pilot.pause()
+
+                mock_save.assert_called_once_with(
+                    "auto_11434_llama3", config=discovered_backend
+                )
+                # Should not have called get_available_backends at all because config was cached
+                mock_get_backends.assert_not_called()
+
+
+@pytest.mark.anyio
 async def test_tui_generate_plan_handles_timeout(mock_services):
     """If LLM call times out, TUI displays explicit timeout error message."""
     mock_services["llm"].plan_triage.side_effect = TimeoutError("LLM call timed out after 120s")
