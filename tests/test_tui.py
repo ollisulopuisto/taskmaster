@@ -283,74 +283,61 @@ async def test_tui_save_settings_skips_autodiscover_for_env_backend(mock_service
                 assert call.kwargs.get("autodiscover") is not True
 
 
-@pytest.mark.anyio
-async def test_tui_save_settings_revalidates_discovered_backend(mock_services):
-    """Saving a discovered backend re-runs discovery and saves the fresh config."""
-    from textual.widgets import Select
-
+def _discovered(model="llama3", base_url="http://localhost:11434/v1"):
     from models.task import LLMBackendConfig
 
-    discovered_backend = LLMBackendConfig(
+    return LLMBackendConfig(
         key="auto_11434_llama3",
-        name="⚡ Discovered Ollama (Port 11434): llama3",
-        base_url="http://localhost:11434/v1",
-        model="llama3",
+        name=f"⚡ Discovered Ollama (Port 11434): {model}",
+        base_url=base_url,
+        model=model,
     )
 
-    with patch(
-        "tui.LLMService.get_available_backends",
-        return_value={"auto_11434_llama3": discovered_backend},
-    ) as mock_get_backends:
+
+async def _select_discovered(app, pilot):
+    from textual.widgets import Select
+
+    await pilot.click("#btn-discover-llm")
+    await pilot.pause()
+    app.query_one("#select-llm-backend", Select).value = "auto_11434_llama3"
+    await pilot.pause()
+
+
+@pytest.mark.anyio
+async def test_tui_save_settings_revalidates_discovered_backend(mock_services):
+    """Saving a discovered backend probes the servers again and saves the live config."""
+    backend = _discovered()
+    with (
+        patch("tui.LLMService.get_available_backends", return_value={backend.key: backend}),
+        patch(
+            "tui.LLMService.discover_live_backends", return_value={backend.key: backend}
+        ) as mock_live,
+    ):
         app = TaskMasterApp()
         async with app.run_test() as pilot:
-            await pilot.click("#btn-discover-llm")
-            await pilot.pause()
-
-            select_widget = app.query_one("#select-llm-backend", Select)
-            select_widget.value = "auto_11434_llama3"
-            await pilot.pause()
-            mock_get_backends.reset_mock()
-
+            await _select_discovered(app, pilot)
             with patch("tui.LLMService.save_settings_to_env") as mock_save:
                 await pilot.click("#btn-save-settings")
                 await pilot.pause()
 
-                mock_save.assert_called_once_with(
-                    "auto_11434_llama3", config=discovered_backend
-                )
-                mock_get_backends.assert_any_call(autodiscover=True)
+                mock_live.assert_called_once()
+                mock_save.assert_called_once_with(backend.key, config=backend)
 
 
 @pytest.mark.anyio
 async def test_tui_save_settings_refuses_backend_that_disappeared(mock_services):
-    """A discovered model that is gone by Save time is not persisted as the default."""
-    from textual.widgets import Select
+    """A discovered model that is gone by Save time is not persisted as the default.
 
-    from models.task import LLMBackendConfig
-
-    discovered_backend = LLMBackendConfig(
-        key="auto_11434_llama3",
-        name="⚡ Discovered Ollama (Port 11434): llama3",
-        base_url="http://localhost:11434/v1",
-        model="llama3",
-    )
-
-    with patch(
-        "tui.LLMService.get_available_backends",
-        return_value={"auto_11434_llama3": discovered_backend},
-    ) as mock_get_backends:
+    The environment still lists a previously saved copy of it, which must not count
+    as proof that the server offers it."""
+    backend = _discovered()
+    with (
+        patch("tui.LLMService.get_available_backends", return_value={backend.key: backend}),
+        patch("tui.LLMService.discover_live_backends", return_value={}),
+    ):
         app = TaskMasterApp()
         async with app.run_test() as pilot:
-            await pilot.click("#btn-discover-llm")
-            await pilot.pause()
-
-            select_widget = app.query_one("#select-llm-backend", Select)
-            select_widget.value = "auto_11434_llama3"
-            await pilot.pause()
-
-            # The model disappears from the server before Save.
-            mock_get_backends.return_value = {}
-
+            await _select_discovered(app, pilot)
             with patch("tui.LLMService.save_settings_to_env") as mock_save:
                 await pilot.click("#btn-save-settings")
                 await pilot.pause()
@@ -358,6 +345,25 @@ async def test_tui_save_settings_refuses_backend_that_disappeared(mock_services)
                 mock_save.assert_not_called()
                 plan_text = app.query_one("#plan-text", Static)
                 assert "no longer available" in str(plan_text.content)
+
+
+@pytest.mark.anyio
+async def test_tui_save_settings_refuses_a_different_model_under_the_same_key(mock_services):
+    """Different model names can normalise to one key; saving must not swap the model."""
+    backend = _discovered(model="foo:bar")
+    replacement = _discovered(model="foo/bar")
+    with (
+        patch("tui.LLMService.get_available_backends", return_value={backend.key: backend}),
+        patch("tui.LLMService.discover_live_backends", return_value={backend.key: replacement}),
+    ):
+        app = TaskMasterApp()
+        async with app.run_test() as pilot:
+            await _select_discovered(app, pilot)
+            with patch("tui.LLMService.save_settings_to_env") as mock_save:
+                await pilot.click("#btn-save-settings")
+                await pilot.pause()
+
+                mock_save.assert_not_called()
 
 
 @pytest.mark.anyio

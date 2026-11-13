@@ -393,6 +393,27 @@ class LLMService:
         )
 
     @classmethod
+    def discover_live_backends(cls) -> dict[str, LLMBackendConfig]:
+        """Probe the servers right now and return only what they offer.
+
+        Unlike `get_available_backends(autodiscover=True)` this ignores the
+        backends saved in the environment and bypasses the LAN cache, so a hit
+        proves the model is served at this moment.
+        """
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            local_future = pool.submit(cls.discover_local_backends)
+            lan_future = pool.submit(cls.discover_lan_backends, use_cache=False)
+            live = dict(local_future.result())
+            live.update(lan_future.result())
+
+        if os.getenv("LLM_LAN_SCAN", "0").strip().lower() in ("1", "true", "yes"):
+            static_hosts = [
+                h.strip() for h in os.getenv("LLM_LAN_HOSTS", "").split(",") if h.strip()
+            ]
+            live.update(cls.scan_lan_ports(hosts=static_hosts or None))
+        return live
+
+    @classmethod
     def get_available_backends(cls, autodiscover: bool = False) -> dict[str, LLMBackendConfig]:
         """Discover available LLM backends defined in environment variables.
 

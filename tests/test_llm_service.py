@@ -689,6 +689,23 @@ class TestLanDiscovery:
             discovered = LLMService.discover_lan_backends(use_cache=False)
         assert discovered == {}
 
+    def test_discover_live_backends_ignores_env_and_lan_cache(self, monkeypatch) -> None:
+        """Live discovery returns only what the servers offer now: no saved environment
+        backends, and the LAN cache is bypassed."""
+        monkeypatch.setenv("LLM_BACKENDS", "auto_11434_llama3")
+        monkeypatch.setenv("LLM_BACKEND_AUTO_11434_LLAMA3_MODEL", "llama3")
+        local = LLMBackendConfig(
+            key="auto_8000_m", name="m", base_url="http://localhost:8000/v1", model="m"
+        )
+        with (
+            patch.object(LLMService, "discover_local_backends", return_value={local.key: local}),
+            patch.object(LLMService, "discover_lan_backends", return_value={}) as mock_lan,
+        ):
+            live = LLMService.discover_live_backends()
+
+        assert live == {local.key: local}
+        mock_lan.assert_called_once_with(use_cache=False)
+
     def test_scan_lan_ports_finds_openai_compatible_host(self) -> None:
         """Subnet scan finds an OpenAI-compatible server on an explicitly given host."""
 

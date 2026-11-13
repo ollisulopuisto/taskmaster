@@ -519,19 +519,31 @@ class TaskMasterApp(App):
 
         if selected_backend.startswith("auto_"):
             # A discovered backend can disappear between Discover and Save (the model
-            # was removed or the server stopped). Re-run discovery and persist only a
-            # backend the servers still offer, never a stale cached snapshot.
-            discovered = await asyncio.to_thread(
-                LLMService.get_available_backends, autodiscover=True
+            # was removed or the server stopped). Probe the servers now, ignoring both
+            # the saved environment definition and the LAN cache, and persist only a
+            # backend they still offer, never a stale snapshot.
+            previous = self._discovered_backends.get(selected_backend)
+            live = await asyncio.to_thread(LLMService.discover_live_backends)
+            config = live.get(selected_backend)
+            # Different model names can map to the same key: the offer must be the
+            # model and endpoint the user picked, not just the same key.
+            changed = (
+                previous is not None
+                and (config.model, config.base_url)
+                != (
+                    previous.model,
+                    previous.base_url,
+                )
+                if config
+                else False
             )
-            self._discovered_backends = dict(discovered)
-            config = discovered.get(selected_backend)
-            if config is None:
+            if config is None or changed:
                 plan_text.update(
                     "[yellow]The selected discovered LLM is no longer available. "
                     "Run Discover LLMs and pick again; nothing was saved.[/yellow]"
                 )
                 return
+            self._discovered_backends.update(live)
         else:
             # Env-configured backends need no network discovery.
             env_backends = await asyncio.to_thread(
