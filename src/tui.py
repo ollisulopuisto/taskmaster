@@ -505,10 +505,9 @@ class TaskMasterApp(App):
     async def action_save_settings(self) -> None:
         """Save selected LLM backend settings to .env file.
 
-        Optimization: Avoid triggering full network autodiscovery (port probing and mDNS LAN scan)
-        when saving settings for standard environment-configured backends or previously discovered
-        backends. Checking memory cache and env-defined backends first reduces settings save latency
-        by ~99% (from ~2.0s down to <5ms).
+        Standard environment-configured backends skip network autodiscovery (port probing and
+        mDNS LAN scan). Discovered ("auto_") backends are re-validated by a fresh discovery so a
+        model that has since disappeared is not persisted as the default.
         """
         plan_text = self.query_one("#plan-text", Static)
         backend_select = self.query_one("#select-llm-backend", Select)
@@ -518,21 +517,39 @@ class TaskMasterApp(App):
             plan_text.update("[yellow]No LLM backend selected to save.[/yellow]")
             return
 
-        # 1. Check in-memory discovered backends cache or env backends without network discovery
-        config = self._discovered_backends.get(selected_backend)
-        if config is None:
+        if selected_backend.startswith("auto_"):
+            # A discovered backend can disappear between Discover and Save (the model
+            # was removed or the server stopped). Probe the servers now, ignoring both
+            # the saved environment definition and the LAN cache, and persist only a
+            # backend they still offer, never a stale snapshot.
+            previous = self._discovered_backends.get(selected_backend)
+            live = await asyncio.to_thread(LLMService.discover_live_backends)
+            config = live.get(selected_backend)
+            # Different model names can map to the same key: the offer must be the
+            # model and endpoint the user picked, not just the same key.
+            changed = (
+                previous is not None
+                and (config.model, config.base_url)
+                != (
+                    previous.model,
+                    previous.base_url,
+                )
+                if config
+                else False
+            )
+            if config is None or changed:
+                plan_text.update(
+                    "[yellow]The selected discovered LLM is no longer available. "
+                    "Run Discover LLMs and pick again; nothing was saved.[/yellow]"
+                )
+                return
+            self._discovered_backends.update(live)
+        else:
+            # Env-configured backends need no network discovery.
             env_backends = await asyncio.to_thread(
                 LLMService.get_available_backends, autodiscover=False
             )
             config = env_backends.get(selected_backend)
-
-        # 2. Only run autodiscovery if selected backend is an unknown auto-discovered key
-        if config is None and selected_backend.startswith("auto_"):
-            discovered = await asyncio.to_thread(
-                LLMService.get_available_backends, autodiscover=True
-            )
-            self._discovered_backends.update(discovered)
-            config = discovered.get(selected_backend)
 
         try:
             await asyncio.to_thread(
