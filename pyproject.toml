@@ -8,18 +8,18 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
-    "fastapi>=0.162.5",
+    "fastapi>=0.165.0",
     "google-api-python-client>=2.202.0",
     "google-auth-httplib2>=0.4.4",
     "google-auth-oauthlib>=1.5.0",
     "instructor>=1.17.0",
-    "litellm>=1.109.1",
-    "pydantic>=2.14.3",
+    "litellm>=1.110.2",
+    "pydantic>=2.14.4",
     "pytest>=9.2.0",
     "pytest-mock>=3.17.0",
     "python-dotenv>=1.2.4",
     "rich>=14.3.4",
-    "ruff>=0.17.5",
+    "ruff>=0.17.6",
     "streamlit>=1.67.0",
     "textual>=8.2.8",
     "todoist-api-python>=4.0.1",
@@ -62,5 +62,5 @@ override-dependencies = ["filelock>=4.2.1"]
 
 [dependency-groups]
 dev = [
-    "playwright>=1.65.1",
+    "playwright>=1.65.2",
 ]
